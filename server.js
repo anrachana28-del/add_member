@@ -62,9 +62,9 @@ while (process.env[`TG_ACCOUNT_${i}_PHONE`]) {
    CREATE CLIENT
 ====================== */
 
-async function getClient(account) {
+async function getClient(account){
 
- if (clients[account.id]) return clients[account.id]
+ if(clients[account.id]) return clients[account.id]
 
  const client = new TelegramClient(
   new StringSession(account.session),
@@ -73,7 +73,7 @@ async function getClient(account) {
   { connectionRetries: 5 }
  )
 
- await client.start({})
+ await client.connect()
 
  clients[account.id] = client
 
