@@ -15,7 +15,7 @@ input, select{width:100%;padding:12px;margin-top:10px;border-radius:12px;border:
 input:focus, select:focus{border:1px solid #00ff7f;}
 button{border:none;padding:12px;border-radius:12px;cursor:pointer;font-size:15px;font-weight:600;background:#00ff7f;color:#0f0f10;transition:0.2s;}
 button:hover{background:#00cc66;color:#fff;}
-button:disabled{background:#444;color:#999;cursor:not-allowed;}
+button:disabled{background:#ff4c4c;color:#fff;cursor:not-allowed;}
 .btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;}
 .btn-group button{flex:1;background:#11141f;color:#fff;}
 .btn-group button:hover{background:#00ff7f;color:#0f0f10;}
@@ -43,6 +43,7 @@ th{background:#11141f;color:#00ff7f;}
 .yellow{color:#ffcc00;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
+#floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
 </style>
 </head>
 <body>
@@ -76,6 +77,7 @@ th{background:#11141f;color:#00ff7f;}
 <div class="card-title">Auto Add Members</div>
 <label for="accountSelect">Select Account (optional):</label>
 <select id="accountSelect"></select>
+<div id="floodAlert">FloodWait Active 🚫</div>
 <input id="sourceGroupInput" placeholder="Source Group">
 <input id="targetGroupInput" placeholder="Target Group">
 <button id="startAutoAddBtn">Start Auto-Add</button>
@@ -118,59 +120,68 @@ document.querySelectorAll(".nav-btn").forEach(btn=>{
 
 // Accounts Table
 const accountsTable=document.getElementById("accountsTable");
-const startAutoAddBtn = document.getElementById("startAutoAddBtn");
 async function fetchAccounts(){
   try{
     const res=await fetch("/account-status"); if(!res.ok) return;
     const data=await res.json();
     const now=Date.now();
     accountsTable.innerHTML="";
-    let allFloodWait=true;
     Object.keys(data).forEach(id=>{
       const acc=data[id]; 
       let floodText="-", countdownClass="green";
       if(acc.floodWaitUntil){
-        const remainingSec=Math.floor((acc.floodWaitUntil-now)/1000);
-        if(remainingSec>0){
-          const ready=new Date(acc.floodWaitUntil);
-          floodText=ready.toLocaleString();
-          countdownClass = remainingSec<60 ? "red" : remainingSec<300 ? "yellow" : "green";
-          allFloodWait=false; // if any account ready in future, allow button
+        const remain=Math.floor((acc.floodWaitUntil-now)/1000);
+        if(remain>0){
+          const dt=new Date(acc.floodWaitUntil);
+          const h=dt.getHours().toString().padStart(2,"0");
+          const m=dt.getMinutes().toString().padStart(2,"0");
+          const s=dt.getSeconds().toString().padStart(2,"0");
+          floodText=`${dt.toLocaleDateString()} ${h}:${m}:${s}`;
+          countdownClass = "red";
         }
-      } else {
-        allFloodWait=false;
       }
       const tr=document.createElement("tr");
       tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
       accountsTable.appendChild(tr);
     });
-    // disable button if all accounts floodWait
-    startAutoAddBtn.disabled = allFloodWait;
   }catch(e){console.log(e);}
 }
-setInterval(fetchAccounts,2000); fetchAccounts();
+setInterval(fetchAccounts,1000); fetchAccounts();
 
-// Accounts dropdown
+// Accounts dropdown + FloodWait auto block
 const accountSelect=document.getElementById("accountSelect");
+const startAutoAddBtn=document.getElementById("startAutoAddBtn");
+const floodAlert=document.getElementById("floodAlert");
 async function loadAccountsDropdown(){
   try{
-    const res=await fetch("/account-status"); if(!res.ok) return; const data=await res.json();
+    const res=await fetch("/account-status"); if(!res.ok) return;
+    const data=await res.json();
     accountSelect.innerHTML="";
+    let anyFlood=false;
     Object.keys(data).forEach(id=>{
       const acc=data[id];
       const option=document.createElement("option");
       option.value=id;
       option.text=`${acc.phone} (${acc.status})`;
-      if(acc.floodWaitUntil && acc.floodWaitUntil>Date.now()) option.disabled=true;
+      if(acc.floodWaitUntil && acc.floodWaitUntil>Date.now()){
+        option.disabled=true;
+        anyFlood=true;
+      }
       accountSelect.appendChild(option);
     });
+    if(anyFlood){
+      startAutoAddBtn.disabled=true;
+      floodAlert.style.display="block";
+    } else {
+      startAutoAddBtn.disabled=false;
+      floodAlert.style.display="none";
+    }
   }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,5000); loadAccountsDropdown();
+setInterval(loadAccountsDropdown,3000); loadAccountsDropdown();
 
 // Auto Add Members
 const autoAddList=document.getElementById("autoAddList"), counter=document.getElementById("autoAddCounter"), progress=document.getElementById("autoAddProgress"), autoAddStatus=document.getElementById("autoAddStatus"), loading=document.getElementById("loading"), autoAddConsole=document.getElementById("autoAddConsole");
-loading.style.display="none";
 
 startAutoAddBtn.onclick=async()=>{
   const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
