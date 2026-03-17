@@ -14,7 +14,7 @@ section{background:#1e1e2a;border-radius:20px;padding:20px;margin-bottom:20px;bo
 input, select{width:100%;padding:12px;margin-top:10px;border-radius:12px;border:none;background:#11141f;color:#fff;font-size:15px;outline:none;}
 input:focus, select:focus{border:1px solid #00ff7f;}
 button{border:none;padding:12px;border-radius:12px;cursor:pointer;font-size:15px;font-weight:600;background:#00ff7f;color:#0f0f10;transition:0.2s;}
-button:hover:not(:disabled){background:#00cc66;color:#fff;}
+button:hover{background:#00cc66;color:#fff;}
 button:disabled{background:#ff4c4c;color:#fff;cursor:not-allowed;}
 .btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;}
 .btn-group button{flex:1;background:#11141f;color:#fff;}
@@ -23,7 +23,7 @@ button:disabled{background:#ff4c4c;color:#fff;cursor:not-allowed;}
 .failed{color:#ff4c4c;font-weight:700;}
 .pending{color:#ffcc00;font-weight:700;}
 .skipped{color:#9999ff;font-weight:700;}
-.floodwait{background:#ff4c4c;color:#fff;font-weight:700;border-radius:6px;animation:blink 1.5s infinite;}
+.floodwait{background:#ffcc00;color:#000;font-weight:700;border-radius:6px;animation:blink 1.5s infinite;}
 @keyframes blink{0%,50%,100%{opacity:1;}25%,75%{opacity:0.5;}}
 .avatar{width:28px;height:28px;border-radius:50%;margin-right:8px;}
 ul{list-style:none;padding:0;margin-top:10px;max-height:400px;overflow-y:auto;}
@@ -32,13 +32,18 @@ li{padding:8px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align
 table{width:100%;border-collapse:collapse;}
 th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,0.1);}
 th{background:#11141f;color:#00ff7f;}
+.page{display:none;}
+.page.active{display:block;}
+.progress-bar{background:#11141f;height:14px;border-radius:10px;margin-top:10px;}
+.progress{background:#00ff7f;height:14px;width:0%;border-radius:10px;transition:width 0.3s;}
+.spinner{text-align:center;margin-top:10px;}
+#autoAddStatus{margin:10px 0;font-weight:700;color:#00ff7f;text-align:center;}
 .countdown{font-weight:700;}
 .green{color:#00ff7f;}
 .yellow{color:#ffcc00;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
-.progress-bar{background:#11141f;height:14px;border-radius:10px;margin-top:10px;}
-.progress{background:#00ff7f;height:14px;width:0%;border-radius:10px;transition:width 0.3s;}
+#floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
 </style>
 </head>
 <body>
@@ -48,17 +53,18 @@ th{background:#11141f;color:#00ff7f;}
 <div class="btn-group">
 <button class="nav-btn" data-page="accountsPage">Accounts</button>
 <button class="nav-btn" data-page="membersPage">Auto Add</button>
+<button class="nav-btn" data-page="uploadPage">Upload</button>
 <button class="nav-btn" data-page="historyPage">History</button>
 </div>
 
-<!-- Accounts Page -->
+<!-- Accounts -->
 <section id="accountsPage" class="page active">
 <div class="card-title">Accounts Status</div>
 <div class="table-responsive">
 <table>
 <thead>
 <tr>
-<th>ID</th><th>Phone</th><th>Status</th><th>FloodWait</th><th>Last Checked</th><th>Action</th>
+<th>ID</th><th>Phone</th><th>Status</th><th>FloodWait</th><th>Last Checked</th>
 </tr>
 </thead>
 <tbody id="accountsTable"></tbody>
@@ -66,14 +72,16 @@ th{background:#11141f;color:#00ff7f;}
 </div>
 </section>
 
-<!-- Auto Add Page -->
+<!-- Auto Add -->
 <section id="membersPage" class="page">
 <div class="card-title">Auto Add Members</div>
 <label for="accountSelect">Select Account (optional):</label>
 <select id="accountSelect"></select>
+<div id="floodAlert">FloodWait Active 🚫</div>
 <input id="sourceGroupInput" placeholder="Source Group">
 <input id="targetGroupInput" placeholder="Target Group">
 <button id="startAutoAddBtn">Start Auto-Add</button>
+<div id="loading" class="spinner">⏳ Loading Members...</div>
 <div id="autoAddStatus"></div>
 <div id="autoAddCounter">0 / 0</div>
 <div class="progress-bar"><div id="autoAddProgress" class="progress"></div></div>
@@ -81,7 +89,20 @@ th{background:#11141f;color:#00ff7f;}
 <div class="console-log" id="autoAddConsole"></div>
 </section>
 
-<!-- History Page -->
+<!-- Upload -->
+<section id="uploadPage" class="page">
+<div class="card-title">Upload Accounts</div>
+<input id="phoneInput" placeholder="Phone +855">
+<input id="apiIdInput" placeholder="API ID">
+<input id="apiHashInput" placeholder="API HASH">
+<input id="sessionInput" placeholder="Session String">
+<button id="addAccountBtn">Add Account</button><br><br>
+<input type="file" id="file" accept=".txt">
+<button id="uploadBtn">Upload File</button>
+<div id="uploadStats"></div>
+</section>
+
+<!-- History -->
 <section id="historyPage" class="page">
 <div class="card-title">History</div>
 <ul id="historyList"></ul>
@@ -93,139 +114,148 @@ th{background:#11141f;color:#00ff7f;}
 <script>
 // Navigation
 document.querySelectorAll(".nav-btn").forEach(btn=>{
-    btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-    document.getElementById(btn.dataset.page).classList.add("active");}
+  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  document.getElementById(btn.dataset.page).classList.add("active");}
 });
 
-// Accounts Table + FloodWait
+// Accounts Table
 const accountsTable=document.getElementById("accountsTable");
 async function fetchAccounts(){
-    try{
-        const res=await fetch("/account-status"); 
-        if(!res.ok) return;
-        const data=await res.json();
-        const now=Date.now();
-        accountsTable.innerHTML="";
-        Object.keys(data).forEach(id=>{
-            const acc=data[id]; 
-            let floodText="-", countdownClass="green", btnDisabled=false;
-            if(acc.floodWaitUntil){
-                const remain=Math.floor((acc.floodWaitUntil-now)/1000);
-                if(remain>0){
-                    const h=Math.floor(remain/3600).toString().padStart(2,"0");
-                    const m=Math.floor((remain%3600)/60).toString().padStart(2,"0");
-                    const s=(remain%60).toString().padStart(2,"0");
-                    floodText=`${acc.readyTime} (${h}:${m}:${s})`;
-                    countdownClass = remain<60 ? "red" : remain<300 ? "yellow" : "green";
-                    btnDisabled=true;
-                }
-            }
-            const tr=document.createElement("tr");
-            tr.innerHTML=`<td>${id}</td>
-            <td>${acc.phone}</td>
-            <td>${acc.status}</td>
-            <td class="countdown ${countdownClass}">${floodText}</td>
-            <td>${new Date(acc.lastChecked||now).toLocaleString()}</td>
-            <td><button ${btnDisabled?'disabled class="floodwait"':''}>Add</button></td>`;
-            accountsTable.appendChild(tr);
-        });
-    }catch(e){console.log(e);}
+  try{
+    const res=await fetch("/account-status"); if(!res.ok) return;
+    const data=await res.json();
+    const now=Date.now();
+    accountsTable.innerHTML="";
+    Object.keys(data).forEach(id=>{
+      const acc=data[id]; 
+      let floodText="-", countdownClass="green";
+      if(acc.floodWaitUntil){
+        const remain=Math.floor((acc.floodWaitUntil-now)/1000);
+        if(remain>0){
+          const dt=new Date(acc.floodWaitUntil);
+          const h=dt.getHours().toString().padStart(2,"0");
+          const m=dt.getMinutes().toString().padStart(2,"0");
+          const s=dt.getSeconds().toString().padStart(2,"0");
+          floodText=`${dt.toLocaleDateString()} ${h}:${m}:${s}`;
+          countdownClass = "red";
+        }
+      }
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
+      accountsTable.appendChild(tr);
+    });
+  }catch(e){console.log(e);}
 }
 setInterval(fetchAccounts,1000); fetchAccounts();
 
-// Accounts dropdown
+// Accounts dropdown + FloodWait auto block
 const accountSelect=document.getElementById("accountSelect");
+const startAutoAddBtn=document.getElementById("startAutoAddBtn");
+const floodAlert=document.getElementById("floodAlert");
 async function loadAccountsDropdown(){
-    try{
-        const res=await fetch("/account-status"); if(!res.ok) return; const data=await res.json();
-        accountSelect.innerHTML="";
-        Object.keys(data).forEach(id=>{
-            const acc=data[id];
-            const option=document.createElement("option");
-            option.value=id;
-            option.text=`${acc.phone} (${acc.status})`;
-            if(acc.floodWaitUntil && acc.floodWaitUntil>Date.now()) option.disabled=true;
-            accountSelect.appendChild(option);
-        });
-    }catch(e){console.log(e);}
+  try{
+    const res=await fetch("/account-status"); if(!res.ok) return;
+    const data=await res.json();
+    accountSelect.innerHTML="";
+    let anyFlood=false;
+    Object.keys(data).forEach(id=>{
+      const acc=data[id];
+      const option=document.createElement("option");
+      option.value=id;
+      option.text=`${acc.phone} (${acc.status})`;
+      if(acc.floodWaitUntil && acc.floodWaitUntil>Date.now()){
+        option.disabled=true;
+        anyFlood=true;
+      }
+      accountSelect.appendChild(option);
+    });
+    if(anyFlood){
+      startAutoAddBtn.disabled=true;
+      floodAlert.style.display="block";
+    } else {
+      startAutoAddBtn.disabled=false;
+      floodAlert.style.display="none";
+    }
+  }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,5000); loadAccountsDropdown();
+setInterval(loadAccountsDropdown,3000); loadAccountsDropdown();
 
 // Auto Add Members
-const autoAddList=document.getElementById("autoAddList"), counter=document.getElementById("autoAddCounter"),
-progress=document.getElementById("autoAddProgress"), autoAddStatus=document.getElementById("autoAddStatus"),
-autoAddConsole=document.getElementById("autoAddConsole");
+const autoAddList=document.getElementById("autoAddList"), counter=document.getElementById("autoAddCounter"), progress=document.getElementById("autoAddProgress"), autoAddStatus=document.getElementById("autoAddStatus"), loading=document.getElementById("loading"), autoAddConsole=document.getElementById("autoAddConsole");
 
 startAutoAddBtn.onclick=async()=>{
-    const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
-    if(!source||!target) return alert("Enter groups");
-    autoAddStatus.innerText="Fetching members..."; autoAddConsole.innerHTML="";
-    const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
-    const members=await res.json();
-    if(members.error){ alert(members.error); return; }
+  const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
+  if(!source||!target) return alert("Enter groups");
+  loading.style.display="block"; autoAddStatus.innerText="Fetching members..."; autoAddConsole.innerHTML="";
+  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
+  const members=await res.json(); loading.style.display="none";
+  if(members.error){ alert(members.error); return; }
 
-    // Filter out missing access_hash
-    const validMembers = members.filter(m=>m.access_hash);
-    if(!validMembers.length){ alert("No members with valid access_hash"); return; }
+  const accRes=await fetch("/account-status"); const accData=await accRes.json();
+  let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
 
-    let accRes=await fetch("/account-status"); const accData=await accRes.json();
-    let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
+  // fetch history
+  const histRes=await fetch("/history"); const histData=await histRes.json(); const histList = Object.values(histData||{});
 
-    const histRes=await fetch("/history"); const histData=await histRes.json(); const histList=Object.values(histData||{});
+  autoAddList.innerHTML=""; counter.innerText=`0 / ${members.length}`; progress.style.width=`0%`;
 
-    autoAddList.innerHTML=""; counter.innerText=`0 / ${validMembers.length}`; progress.style.width=`0%`;
+  function getNextAvailableAccount(startIndex){
+    const now=Date.now();
+    for(let i=0;i<accountsList.length;i++){
+      let idx=(startIndex+i)%accountsList.length;
+      const acc=accData[accountsList[idx]];
+      if(!acc.floodWaitUntil || acc.floodWaitUntil<=now) return idx;
+    }
+    return -1;
+  }
 
-    function getNextAvailableAccount(startIndex){
-        const now=Date.now();
-        for(let i=0;i<accountsList.length;i++){
-            let idx=(startIndex+i)%accountsList.length;
-            const acc=accData[accountsList[idx]];
-            if(!acc.floodWaitUntil || acc.floodWaitUntil<=now) return idx;
-        }
-        return -1;
+  for(const m of members){
+    const already = histList.some(h => (h.username===m.username||h.user_id===m.user_id) && h.status==="success");
+    if(already){
+      autoAddConsole.innerHTML+=`[SKIP] ${m.username||m.user_id} already added<br>`;
+      autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
+      continue;
     }
 
-    for(const m of validMembers){
-        const already=histList.some(h=>(h.username===m.username||h.user_id===m.user_id)&&h.status==="success");
-        if(already){ autoAddConsole.innerHTML+=`[SKIP] ${m.username||m.user_id} already added<br>`; continue; }
+    let nextAccIdx=getNextAvailableAccount(accIndex);
+    if(nextAccIdx===-1){ autoAddStatus.innerText="All accounts FloodWait. Waiting..."; await new Promise(r=>setTimeout(r,5000)); nextAccIdx=getNextAvailableAccount(accIndex); if(nextAccIdx===-1) break; }
+    accIndex=nextAccIdx;
+    const currentAccount=accountsList[accIndex];
 
-        let nextAccIdx=getNextAvailableAccount(accIndex);
-        if(nextAccIdx===-1){ autoAddStatus.innerText="All accounts FloodWait. Waiting..."; await new Promise(r=>setTimeout(r,5000)); nextAccIdx=getNextAvailableAccount(accIndex); if(nextAccIdx===-1) break; }
-        accIndex=nextAccIdx; const currentAccount=accountsList[accIndex];
+    autoAddConsole.innerHTML+=`[INFO] Using account: ${currentAccount} for ${m.username||m.user_id}<br>`;
+    autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
 
-        autoAddConsole.innerHTML+=`[INFO] Using account: ${currentAccount} for ${m.username||m.user_id}<br>`;
-        const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target,accountId:currentAccount})});
-        const result=await addRes.json();
+    const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target,accountId:currentAccount})});
+    const result=await addRes.json();
 
-        const li=document.createElement("li");
-        li.innerHTML=`<img class="avatar" src="${m.avatar}"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed}<br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
-        autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
+    const li=document.createElement("li");
+    li.innerHTML=`<img class="avatar" src="${m.avatar}"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed}<br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
+    autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
 
-        processed++; counter.innerText=`${processed} / ${validMembers.length}`;
-        progress.style.width=`${Math.floor((processed/validMembers.length)*100)}%`;
+    processed++; counter.innerText=`${processed} / ${members.length}`;
+    progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
 
-        if(result.status==="success") await new Promise(r=>setTimeout(r,30000));
-        if(result.status==="success" || result.reason.includes("FloodWait")) accIndex=(accIndex+1)%accountsList.length;
-    }
+    if(result.status==="success") await new Promise(r=>setTimeout(r,30000));
+    if(result.status==="success" || result.reason.includes("FloodWait")) accIndex=(accIndex+1)%accountsList.length;
+  }
 
-    autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
+  autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
 };
 
 // History
 const historyList=document.getElementById("historyList");
 async function fetchHistory(){
-    const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
-    Object.values(data).forEach(h=>{
-        const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
-        historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'}</span></li>`;
-    });
+  const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
+  Object.values(data).forEach(h=>{
+    const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
+    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'}</span></li>`;
+  });
 }
 setInterval(fetchHistory,6000); fetchHistory();
-
 downloadHistoryBtn.onclick=async()=>{
-    const res=await fetch("/history"); const data=await res.json();
-    const blob=new Blob([JSON.stringify(data,null,2)]); const a=document.createElement("a");
-    a.href=URL.createObjectURL(blob); a.download="history.json"; a.click();
+  const res=await fetch("/history"); const data=await res.json();
+  const blob=new Blob([JSON.stringify(data,null,2)]); const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="history.json"; a.click();
 };
 </script>
 </body>
