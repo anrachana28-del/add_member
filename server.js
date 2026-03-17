@@ -11,7 +11,7 @@ const app = express()
 app.use(express.json())
 
 /* ======================
-   DELAY FUNCTIONS
+   DELAY FUNCTION
 ====================== */
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
@@ -66,14 +66,14 @@ function parseFlood(err) {
 }
 
 /* ======================
-   ACCOUNT CHECK
+   CHECK ACCOUNT
 ====================== */
 async function checkTGAccount(account) {
   try {
     const client = await getClient(account)
     await client.getMe()
     account.status = "active"
-    await update(ref(db, `accounts/${account.id}`), { status: "active", phone: account.phone, lastChecked: Date.now(), floodWaitUntil: null })
+    await update(ref(db, `accounts/${account.id}`), { status: "active", phone: account.phone, lastChecked: Date.now() })
   } catch (err) {
     const wait = parseFlood(err)
     let status = "error", floodUntil = null
@@ -105,8 +105,8 @@ app.post('/members', async (req,res)=>{
     while(true){
       const participants = await client.getParticipants(entity,{limit, offset})
       if(!participants.length) break
-      all=all.concat(participants)
-      offset+=participants.length
+      all = all.concat(participants)
+      offset += participants.length
     }
     const members = all.filter(p=>!p.bot).map(p=>({user_id:p.id, username:p.username, avatar:`https://t.me/i/userpic/320/${p.id}.jpg`}))
     res.json(members)
@@ -122,16 +122,13 @@ app.post('/add-member', async(req,res)=>{
     const { username, user_id, targetGroup } = req.body
     const now = Date.now()
 
-    // Check history
+    // Load history
     const snap = await get(ref(db,'history'))
     const historyData = snap.val()||{}
     const alreadyAdded = Object.values(historyData).some(h => (h.username===username||h.user_id===user_id) && h.status==="success")
-    if(alreadyAdded){
-      console.log(`⚠️ ${username||user_id} already added → skip`)
-      return res.json({status:"skipped", reason:"already added", accountUsed:"none"})
-    }
+    if(alreadyAdded) return res.json({status:"skipped", reason:"already added", accountUsed:"none"})
 
-    // Active accounts
+    // Find available account
     const activeAccounts = accounts.filter(a=>!a.floodWaitUntil || a.floodWaitUntil<now)
     if(!activeAccounts.length) return res.json({status:"failed", reason:"All accounts FloodWait", accountUsed:"none"})
 
@@ -139,6 +136,15 @@ app.post('/add-member', async(req,res)=>{
     let acc = activeAccounts[accIndexLocal]
     const client = await getClient(acc)
     const group = await client.getEntity(targetGroup)
+
+    // Check if user is already in target group
+    try{
+      const isMember = await client.getParticipants(group,{filter: new Api.ChannelParticipantsSearch({q: username || ""})})
+      if(isMember.find(u=>u.id===user_id)){
+        return res.json({status:"skipped", reason:"already in group", accountUsed:acc.id})
+      }
+    }catch{}
+
     const user = username ? await client.getEntity(username) : await client.getEntity(user_id)
 
     let status="failed", reason="unknown", moveNextAccount=false
@@ -146,8 +152,7 @@ app.post('/add-member', async(req,res)=>{
       await client.invoke(new Api.channels.InviteToChannel({channel:group,users:[user]}))
       status="success"
       reason="joined"
-      console.log(`✅ ${username||user_id} added by ${acc.id}`)
-      await sleep(30000) // fixed 30s delay after success
+      await sleep(30000) // delay only after success
       moveNextAccount=true
     }catch(err){
       const wait=parseFlood(err)
@@ -156,13 +161,14 @@ app.post('/add-member', async(req,res)=>{
         acc.floodWaitUntil=until
         acc.status="floodwait"
         await update(ref(db, `accounts/${acc.id}`), {status:"floodwait", floodWaitUntil:until})
-        const ready=new Date(until).toLocaleTimeString('en-US',{hour12:true})
+        const ready=new Date(until).toLocaleString('en-US',{
+          weekday:'short', year:'numeric', month:'short', day:'numeric',
+          hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true
+        })
         reason=`FloodWait ${wait}s | Ready ${ready}`
-        console.log(`🚫 ${acc.id} FloodWait ${wait}s | Ready ${ready}`)
         moveNextAccount=true
       }else{
         reason=err.message
-        console.log(`❌ Error: ${err.message} → retry same account next member`)
         moveNextAccount=false
       }
     }
@@ -171,7 +177,7 @@ app.post('/add-member', async(req,res)=>{
 
     await push(ref(db,'history'),{username,user_id,status,reason,accountUsed:acc.id,timestamp:Date.now()})
     res.json({status, reason, accountUsed:acc.id})
-  }catch(err){ res.json({status:"failed", reason:err.message, accountUsed:"unknown"}) }
+  }catch(err){ res.json({status:"failed", reason:err.message, accountUsed:"unknown"})}
 })
 
 /* ======================
@@ -185,7 +191,13 @@ app.get('/account-status', async(req,res)=>{
     const a = data[id]
     if(a.floodWaitUntil){
       const remain=a.floodWaitUntil-now
-      if(remain>0) a.readyTime=new Date(a.floodWaitUntil).toLocaleTimeString('en-US',{hour12:true})
+      if(remain>0){
+        const ready=new Date(a.floodWaitUntil)
+        a.readyTime = ready.toLocaleString('en-US',{
+          weekday:'short', year:'numeric', month:'short', day:'numeric',
+          hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true
+        })
+      }
     }
   }
   res.json(data)
