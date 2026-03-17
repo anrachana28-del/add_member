@@ -111,11 +111,13 @@ th{background:#11141f;color:#00ff7f;}
 <script>
 // Navigation
 document.querySelectorAll(".nav-btn").forEach(btn=>{
-  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-  document.getElementById(btn.dataset.page).classList.add("active");}
+  btn.onclick=()=>{
+    document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+    document.getElementById(btn.dataset.page).classList.add("active");
+  }
 });
 
-// Accounts Table
+// Accounts Table with FloodWait date-time persistent
 const accountsTable=document.getElementById("accountsTable");
 async function fetchAccounts(){
   try{
@@ -124,25 +126,22 @@ async function fetchAccounts(){
     const now=Date.now();
     accountsTable.innerHTML="";
     Object.keys(data).forEach(id=>{
-      const acc=data[id]; 
-      let floodText="-", countdownClass="green";
-      if(acc.floodWaitUntil){
-        const remainingSec=Math.floor((acc.floodWaitUntil-now)/1000);
-        if(remainingSec>0){
-          const h=Math.floor(remainingSec/3600).toString().padStart(2,"0");
-          const m=Math.floor((remainingSec%3600)/60).toString().padStart(2,"0");
-          const s=(remainingSec%60).toString().padStart(2,"0");
-          floodText=`${acc.readyTime} (${h}:${m}:${s})`;
-          countdownClass = remainingSec<60 ? "red" : remainingSec<300 ? "yellow" : "green";
-        }
+      const acc=data[id];
+      let floodText="-";
+      if(acc.floodWaitUntil && acc.floodWaitUntil>now){
+        const readyDate=new Date(acc.floodWaitUntil);
+        floodText=readyDate.toLocaleString('en-US',{
+          weekday:'short', year:'numeric', month:'short', day:'numeric',
+          hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true
+        });
       }
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
+      tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td>${floodText}</td><td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
       accountsTable.appendChild(tr);
     });
   }catch(e){console.log(e);}
 }
-setInterval(fetchAccounts,1000); fetchAccounts();
+setInterval(fetchAccounts,5000); fetchAccounts();
 
 // Accounts dropdown
 const accountSelect=document.getElementById("accountSelect");
@@ -153,8 +152,7 @@ async function loadAccountsDropdown(){
     Object.keys(data).forEach(id=>{
       const acc=data[id];
       const option=document.createElement("option");
-      option.value=id;
-      option.text=`${acc.phone} (${acc.status})`;
+      option.value=id; option.text=`${acc.phone} (${acc.status})`;
       if(acc.floodWaitUntil && acc.floodWaitUntil>Date.now()) option.disabled=true;
       accountSelect.appendChild(option);
     });
@@ -196,8 +194,7 @@ startAutoAddBtn.onclick=async()=>{
     // skip history
     const already = histList.some(h => (h.username===m.username||h.user_id===m.user_id) && h.status==="success");
     if(already){
-      autoAddConsole.innerHTML+=`[SKIP] ${m.username||m.user_id} already added<br>`;
-      autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
+      autoAddConsole.innerHTML+=`[SKIP] ${m.username||m.user_id} already added<br>`; autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
       continue;
     }
 
@@ -206,8 +203,7 @@ startAutoAddBtn.onclick=async()=>{
     accIndex=nextAccIdx;
     const currentAccount=accountsList[accIndex];
 
-    autoAddConsole.innerHTML+=`[INFO] Using account: ${currentAccount} for ${m.username||m.user_id}<br>`;
-    autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
+    autoAddConsole.innerHTML+=`[INFO] Using account: ${currentAccount} for ${m.username||m.user_id}<br>`; autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
 
     const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,targetGroup:target,accountId:currentAccount})});
     const result=await addRes.json();
