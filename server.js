@@ -73,7 +73,7 @@ async function checkTGAccount(account) {
     const client = await getClient(account)
     await client.getMe()
     account.status = "active"
-    await update(ref(db, `accounts/${account.id}`), { status: "active", phone: account.phone, lastChecked: Date.now() })
+    await update(ref(db, `accounts/${account.id}`), { status: "active", phone: account.phone, lastChecked: Date.now(), floodWaitUntil: null })
   } catch (err) {
     const wait = parseFlood(err)
     let status = "error", floodUntil = null
@@ -105,10 +105,15 @@ app.post('/members', async (req,res)=>{
     while(true){
       const participants = await client.getParticipants(entity,{limit, offset})
       if(!participants.length) break
-      all = all.concat(participants)
-      offset += participants.length
+      all=all.concat(participants)
+      offset+=participants.length
     }
-    const members = all.filter(p=>!p.bot).map(p=>({user_id:p.id, username:p.username, avatar:`https://t.me/i/userpic/320/${p.id}.jpg`}))
+    const members = all.filter(p=>!p.bot).map(p=>({
+      user_id: p.id,
+      username: p.username,
+      access_hash: p.access_hash,
+      avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
+    }))
     res.json(members)
   }catch(err){ res.json({error:err.message}) }
 })
@@ -119,37 +124,48 @@ app.post('/members', async (req,res)=>{
 let accountIndex = 0
 app.post('/add-member', async(req,res)=>{
   try{
-    const { username, user_id, targetGroup } = req.body
+    const { username, user_id, access_hash, targetGroup } = req.body
     const now = Date.now()
-
-    // Load history
-    const snap = await get(ref(db,'history'))
-    const historyData = snap.val()||{}
-    const alreadyAdded = Object.values(historyData).some(h => (h.username===username||h.user_id===user_id) && h.status==="success")
-    if(alreadyAdded) return res.json({status:"skipped", reason:"already added", accountUsed:"none"})
-
-    // Find available account
-    const activeAccounts = accounts.filter(a=>!a.floodWaitUntil || a.floodWaitUntil<now)
-    if(!activeAccounts.length) return res.json({status:"failed", reason:"All accounts FloodWait", accountUsed:"none"})
-
-    let accIndexLocal = accountIndex % activeAccounts.length
-    let acc = activeAccounts[accIndexLocal]
-    const client = await getClient(acc)
+    const clientAcc = accounts.find(a=>!a.floodWaitUntil || a.floodWaitUntil<now)
+    if(!clientAcc) return res.json({status:"failed", reason:"All accounts FloodWait", accountUsed:"none"})
+    const client = await getClient(clientAcc)
     const group = await client.getEntity(targetGroup)
 
-    // Check if user is already in target group
+    // check history
+    const snap = await get(ref(db,'history'))
+    const historyData = snap.val()||{}
+    const alreadyAdded = Object.values(historyData).some(h => 
+      (h.username===username || h.user_id===user_id) && h.status==="success"
+    )
+
+    // check target group
+    let alreadyInGroup = false
     try{
-      const isMember = await client.getParticipants(group,{filter: new Api.ChannelParticipantsSearch({q: username || ""})})
-      if(isMember.find(u=>u.id===user_id)){
-        return res.json({status:"skipped", reason:"already in group", accountUsed:acc.id})
-      }
-    }catch{}
+      const participants = await client.getParticipants(group)
+      alreadyInGroup = participants.some(p => p.id === user_id)
+    }catch(err){}
 
-    const user = username ? await client.getEntity(username) : await client.getEntity(user_id)
+    if(alreadyAdded || alreadyInGroup){
+      const reason = alreadyAdded ? "already in history" : "already in group"
+      await push(ref(db,'history'),{username,user_id,status:"skipped",reason,accountUsed:"none",timestamp:Date.now()})
+      return res.json({status:"skipped", reason, accountUsed:"none"})
+    }
 
+    // prepare user entity
+    let userEntity
+    if(username){
+      userEntity = await client.getEntity(username)
+    } else if(user_id && access_hash){
+      userEntity = new Api.InputUser({userId: user_id, accessHash: BigInt(access_hash)})
+    } else {
+      await push(ref(db,'history'),{username,user_id,status:"skipped",reason:"missing access_hash",accountUsed:"none",timestamp:Date.now()})
+      return res.json({status:"skipped", reason:"missing access_hash", accountUsed:"none"})
+    }
+
+    // attempt add
     let status="failed", reason="unknown", moveNextAccount=false
     try{
-      await client.invoke(new Api.channels.InviteToChannel({channel:group,users:[user]}))
+      await client.invoke(new Api.channels.InviteToChannel({channel:group, users:[userEntity]}))
       status="success"
       reason="joined"
       await sleep(30000) // delay only after success
@@ -158,16 +174,13 @@ app.post('/add-member', async(req,res)=>{
       const wait=parseFlood(err)
       if(wait){
         const until=Date.now()+wait*1000
-        acc.floodWaitUntil=until
-        acc.status="floodwait"
-        await update(ref(db, `accounts/${acc.id}`), {status:"floodwait", floodWaitUntil:until})
-        const ready=new Date(until).toLocaleString('en-US',{
-          weekday:'short', year:'numeric', month:'short', day:'numeric',
-          hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true
-        })
+        clientAcc.floodWaitUntil=until
+        clientAcc.status="floodwait"
+        await update(ref(db, `accounts/${clientAcc.id}`), {status:"floodwait", floodWaitUntil:until})
+        const ready=new Date(until).toLocaleTimeString('en-US',{hour12:true})
         reason=`FloodWait ${wait}s | Ready ${ready}`
         moveNextAccount=true
-      }else{
+      } else {
         reason=err.message
         moveNextAccount=false
       }
@@ -175,9 +188,12 @@ app.post('/add-member', async(req,res)=>{
 
     if(moveNextAccount) accountIndex++
 
-    await push(ref(db,'history'),{username,user_id,status,reason,accountUsed:acc.id,timestamp:Date.now()})
-    res.json({status, reason, accountUsed:acc.id})
-  }catch(err){ res.json({status:"failed", reason:err.message, accountUsed:"unknown"})}
+    await push(ref(db,'history'),{username,user_id,status,reason,accountUsed:clientAcc.id,timestamp:Date.now()})
+    res.json({status, reason, accountUsed:clientAcc.id})
+
+  }catch(err){
+    res.json({status:"failed", reason:err.message, accountUsed:"unknown"})
+  }
 })
 
 /* ======================
@@ -191,13 +207,7 @@ app.get('/account-status', async(req,res)=>{
     const a = data[id]
     if(a.floodWaitUntil){
       const remain=a.floodWaitUntil-now
-      if(remain>0){
-        const ready=new Date(a.floodWaitUntil)
-        a.readyTime = ready.toLocaleString('en-US',{
-          weekday:'short', year:'numeric', month:'short', day:'numeric',
-          hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true
-        })
-      }
+      if(remain>0) a.readyTime=new Date(a.floodWaitUntil).toLocaleTimeString('en-US',{hour12:true})
     }
   }
   res.json(data)
