@@ -38,7 +38,15 @@ while (process.env[`TG_ACCOUNT_${i}_PHONE`]) {
   const session = process.env[`TG_ACCOUNT_${i}_SESSION`]
   const phone = process.env[`TG_ACCOUNT_${i}_PHONE`]
   if (!api_id || !api_hash || !session) { i++; continue }
-  accounts.push({ phone, api_id, api_hash, session, id: `TG_ACCOUNT_${i}`, status: "pending", floodWaitUntil: null })
+  accounts.push({
+    phone,
+    api_id,
+    api_hash,
+    session,
+    id: `TG_ACCOUNT_${i}`,
+    status: "pending",
+    floodWaitUntil: null
+  })
   i++
 }
 
@@ -73,12 +81,28 @@ async function checkTGAccount(account) {
     const client = await getClient(account)
     await client.getMe()
     account.status = "active"
-    await update(ref(db, `accounts/${account.id}`), { status: "active", phone: account.phone, lastChecked: Date.now(), floodWaitUntil: null })
+    account.floodWaitUntil = null
+    await update(ref(db, `accounts/${account.id}`), {
+      status: "active",
+      phone: account.phone,
+      lastChecked: Date.now(),
+      floodWaitUntil: null
+    })
   } catch (err) {
     const wait = parseFlood(err)
     let status = "error", floodUntil = null
-    if (wait) { status="floodwait"; floodUntil=Date.now()+wait*1000; account.floodWaitUntil=floodUntil }
-    await update(ref(db, `accounts/${account.id}`), { status, error: err.message, phone: account.phone, floodWaitUntil: floodUntil, lastChecked: Date.now() })
+    if (wait) {
+      status="floodwait"
+      floodUntil=Date.now()+wait*1000
+      account.floodWaitUntil=floodUntil
+    }
+    await update(ref(db, `accounts/${account.id}`), {
+      status,
+      error: err.message,
+      phone: account.phone,
+      floodWaitUntil: floodUntil,
+      lastChecked: Date.now()
+    })
   }
 }
 
@@ -128,6 +152,7 @@ app.post('/add-member', async(req,res)=>{
     const now = Date.now()
     const clientAcc = accounts.find(a=>!a.floodWaitUntil || a.floodWaitUntil<now)
     if(!clientAcc) return res.json({status:"failed", reason:"All accounts FloodWait", accountUsed:"none"})
+
     const client = await getClient(clientAcc)
     const group = await client.getEntity(targetGroup)
 
@@ -177,7 +202,7 @@ app.post('/add-member', async(req,res)=>{
         clientAcc.floodWaitUntil=until
         clientAcc.status="floodwait"
         await update(ref(db, `accounts/${clientAcc.id}`), {status:"floodwait", floodWaitUntil:until})
-        const ready=new Date(until).toLocaleTimeString('en-US',{hour12:true})
+        const ready=new Date(until).toLocaleString()
         reason=`FloodWait ${wait}s | Ready ${ready}`
         moveNextAccount=true
       } else {
@@ -207,7 +232,7 @@ app.get('/account-status', async(req,res)=>{
     const a = data[id]
     if(a.floodWaitUntil){
       const remain=a.floodWaitUntil-now
-      if(remain>0) a.readyTime=new Date(a.floodWaitUntil).toLocaleTimeString('en-US',{hour12:true})
+      if(remain>0) a.readyTime=new Date(a.floodWaitUntil).toLocaleString()
     }
   }
   res.json(data)
