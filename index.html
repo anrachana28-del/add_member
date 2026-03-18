@@ -215,36 +215,61 @@ startAutoAddBtn.onclick=async()=>{
     return -1;
   }
 
-  for(const m of members){
+ for(const m of members){
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', {hour12:true}); // hh:mm:ss am/pm
+
     // Skip if in history
     const alreadyHistory = histList.some(h => (h.username===m.username || h.user_id===m.user_id) && h.status==="success");
     if(alreadyHistory){
-      autoAddConsole.innerHTML+=`[SKIP] ${m.username||m.user_id} already in history<br>`;
+      autoAddConsole.innerHTML+=`[SKIP ${timeStr}] ${m.username||m.user_id} already in history<br>`;
       autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
-      processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+      processed++; counter.innerText=`${processed} / ${members.length}`; 
+      progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
       continue;
     }
 
     let nextAccIdx=getNextAvailableAccount(accIndex);
-    if(nextAccIdx===-1){ autoAddStatus.innerText="All accounts FloodWait. Waiting..."; await new Promise(r=>setTimeout(r,5000)); nextAccIdx=getNextAvailableAccount(accIndex); if(nextAccIdx===-1) break; }
+    if(nextAccIdx===-1){ 
+        autoAddStatus.innerText="All accounts FloodWait. Waiting..."; 
+        await new Promise(r=>setTimeout(r,5000)); 
+        nextAccIdx=getNextAvailableAccount(accIndex); 
+        if(nextAccIdx===-1) break; 
+    }
     accIndex=nextAccIdx;
     const currentAccount=accountsList[accIndex];
 
-    autoAddConsole.innerHTML+=`[INFO] Using account: ${currentAccount} for ${m.username||m.user_id}<br>`;
+    autoAddConsole.innerHTML+=`[INFO ${timeStr}] Using account: ${currentAccount} for ${m.username||m.user_id}<br>`;
     autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
 
     const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
     const result=await addRes.json();
 
     const li=document.createElement("li");
-    li.innerHTML=`<img class="avatar" src="${m.avatar}"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed}<br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
+    li.innerHTML=`<img class="avatar" src="${m.avatar}"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <span class="pending">[${timeStr}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
     autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
 
-    processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+    processed++; counter.innerText=`${processed} / ${members.length}`; 
+    progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
 
-    if(result.status==="success") await new Promise(r=>setTimeout(r,30000));
+    if(result.status==="success"){
+    // Countdown 30s before next add
+    let countdown = 30;
+    autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+
+    const interval = setInterval(() => {
+        countdown--;
+        autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+        if(countdown <= 0) {
+            clearInterval(interval);
+            autoAddStatus.innerText = "Resuming Auto Add...";
+        }
+    }, 1000);
+
+    await new Promise(r => setTimeout(r, 30000)); // original delay
+}
     if(result.status==="success" || result.reason.includes("FloodWait")) accIndex=(accIndex+1)%accountsList.length;
-  }
+}
 
   autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
 };
