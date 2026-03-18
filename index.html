@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -115,7 +114,7 @@ th{background:#11141f;color:#00ff7f;}
 <script>
 // ===== Navigation =====
 document.querySelectorAll(".nav-btn").forEach(btn=>{
-  btn.onclick=()=>{
+  btn.onclick=()=>{ 
     document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
     document.getElementById(btn.dataset.page).classList.add("active");
   }
@@ -143,17 +142,34 @@ async function fetchAccounts(){
       tr.innerHTML=`<td>${id}</td>
                     <td>${acc.phone}</td>
                     <td>${acc.status}</td>
-                    <td class="countdown ${countdownClass}">${floodText}</td>
+                    <td class="countdown ${countdownClass}" data-timestamp="${acc.floodWaitUntil||0}">${floodText}</td>
                     <td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
       accountsTable.appendChild(tr);
     });
   }catch(e){console.log(e);}
 }
-setInterval(fetchAccounts,1000); fetchAccounts();
+
+// Update countdown every second
+setInterval(()=>{
+  document.querySelectorAll(".countdown").forEach(el=>{
+    const ts = Number(el.dataset.timestamp);
+    if(ts && ts>Date.now()){
+      const remain = Math.floor((ts - Date.now())/1000);
+      el.innerText = `${remain}s remaining`;
+    } else {
+      el.innerText="-";
+      el.className="countdown green";
+    }
+  })
+},1000);
+
+setInterval(fetchAccounts,5000); fetchAccounts();
+
 // ===== Accounts dropdown + FloodWait =====
 const accountSelect=document.getElementById("accountSelect");
 const startAutoAddBtn=document.getElementById("startAutoAddBtn");
 const floodAlert=document.getElementById("floodAlert");
+
 async function loadAccountsDropdown(){
   try{
     const res=await fetch("/account-status"); if(!res.ok) return;
@@ -167,8 +183,6 @@ async function loadAccountsDropdown(){
       const option=document.createElement("option");
       option.value=id;
       option.text=`${acc.phone} (${acc.status})`;
-
-      // Disable if in FloodWait
       if(acc.floodWaitUntil && acc.floodWaitUntil>now){
         option.disabled=true;
         anyFlood=true;
@@ -178,12 +192,12 @@ async function loadAccountsDropdown(){
       accountSelect.appendChild(option);
     });
 
-    // Flood alert + disable Add button
     startAutoAddBtn.disabled = anyFlood;
     floodAlert.style.display = anyFlood ? "block" : "none";
 
   }catch(e){console.log(e);}
 }
+
 setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
 
 // ===== Auto Add Members =====
@@ -219,11 +233,10 @@ startAutoAddBtn.onclick=async()=>{
     return -1;
   }
 
- for(const m of members){
+  for(const m of members){
     const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', {hour12:true}); // hh:mm:ss am/pm
+    const timeStr = now.toLocaleTimeString('en-US', {hour12:true});
 
-    // Skip if in history
     const alreadyHistory = histList.some(h => (h.username===m.username || h.user_id===m.user_id) && h.status==="success");
     if(alreadyHistory){
       autoAddConsole.innerHTML+=`[SKIP ${timeStr}] ${m.username||m.user_id} already in history<br>`;
@@ -257,23 +270,21 @@ startAutoAddBtn.onclick=async()=>{
     progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
 
     if(result.status==="success"){
-    // Countdown 30s before next add
-    let countdown = 30;
-    autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+      let countdown = 30;
+      autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+      const interval = setInterval(() => {
+          countdown--;
+          autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+          if(countdown <= 0) {
+              clearInterval(interval);
+              autoAddStatus.innerText = "Resuming Auto Add...";
+          }
+      }, 1000);
+      await new Promise(r => setTimeout(r, 30000));
+    }
 
-    const interval = setInterval(() => {
-        countdown--;
-        autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-        if(countdown <= 0) {
-            clearInterval(interval);
-            autoAddStatus.innerText = "Resuming Auto Add...";
-        }
-    }, 1000);
-
-    await new Promise(r => setTimeout(r, 30000)); // original delay
-}
     if(result.status==="success" || result.reason.includes("FloodWait")) accIndex=(accIndex+1)%accountsList.length;
-}
+  }
 
   autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
 };
