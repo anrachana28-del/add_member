@@ -36,7 +36,7 @@ th{background:#11141f;color:#00ff7f;}
 .page.active{display:block;}
 .progress-bar{background:#11141f;height:14px;border-radius:10px;margin-top:10px;}
 .progress{background:#00ff7f;height:14px;width:0%;border-radius:10px;transition:width 0.3s;}
-.spinner{text-align:center;margin-top:10px;}
+.spinner{text-align:center;margin-top:10px;display:none;}
 #autoAddStatus{margin:10px 0;font-weight:700;color:#00ff7f;text-align:center;}
 .countdown{font-weight:700;}
 .green{color:#00ff7f;}
@@ -112,13 +112,13 @@ th{background:#11141f;color:#00ff7f;}
 </div>
 
 <script>
-// Navigation
+// NAVIGATION
 document.querySelectorAll(".nav-btn").forEach(btn=>{
   btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.getElementById(btn.dataset.page).classList.add("active");}
 });
 
-// Accounts Table
+// ACCOUNTS
 const accountsTable=document.getElementById("accountsTable");
 async function fetchAccounts(){
   try{
@@ -148,7 +148,7 @@ async function fetchAccounts(){
 }
 setInterval(fetchAccounts,1000); fetchAccounts();
 
-// Accounts dropdown + FloodWait auto block
+// ACCOUNTS DROPDOWN + FLOODWAIT
 const accountSelect=document.getElementById("accountSelect");
 const startAutoAddBtn=document.getElementById("startAutoAddBtn");
 const floodAlert=document.getElementById("floodAlert");
@@ -169,20 +169,14 @@ async function loadAccountsDropdown(){
       }
       accountSelect.appendChild(option);
     });
-    if(anyFlood){
-      startAutoAddBtn.disabled=true;
-      floodAlert.style.display="block";
-    } else {
-      startAutoAddBtn.disabled=false;
-      floodAlert.style.display="none";
-    }
+    startAutoAddBtn.disabled=anyFlood;
+    floodAlert.style.display=anyFlood?"block":"none";
   }catch(e){console.log(e);}
 }
 setInterval(loadAccountsDropdown,3000); loadAccountsDropdown();
 
-// Auto Add Members
+// AUTO ADD
 const autoAddList=document.getElementById("autoAddList"), counter=document.getElementById("autoAddCounter"), progress=document.getElementById("autoAddProgress"), autoAddStatus=document.getElementById("autoAddStatus"), loading=document.getElementById("loading"), autoAddConsole=document.getElementById("autoAddConsole");
-
 startAutoAddBtn.onclick=async()=>{
   const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
   if(!source||!target) return alert("Enter groups");
@@ -193,10 +187,7 @@ startAutoAddBtn.onclick=async()=>{
 
   const accRes=await fetch("/account-status"); const accData=await accRes.json();
   let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
-
-  // fetch history
   const histRes=await fetch("/history"); const histData=await histRes.json(); const histList = Object.values(histData||{});
-
   autoAddList.innerHTML=""; counter.innerText=`0 / ${members.length}`; progress.style.width=`0%`;
 
   function getNextAvailableAccount(startIndex){
@@ -242,20 +233,28 @@ startAutoAddBtn.onclick=async()=>{
   autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
 };
 
-// History
+// HISTORY
 const historyList=document.getElementById("historyList");
+const downloadHistoryBtn=document.getElementById("downloadHistoryBtn");
 async function fetchHistory(){
-  const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
-  Object.values(data).forEach(h=>{
-    const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
-    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'}</span></li>`;
-  });
+  try{
+    const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
+    Object.values(data).forEach(h=>{
+      const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
+      historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span style="font-size:12px;color:#ccc;">Reason: ${h.reason||'N/A'}</span></li>`;
+    });
+  }catch(e){console.log(e);}
 }
 setInterval(fetchHistory,6000); fetchHistory();
 downloadHistoryBtn.onclick=async()=>{
-  const res=await fetch("/history"); const data=await res.json();
-  const blob=new Blob([JSON.stringify(data,null,2)]); const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob); a.download="history.json"; a.click();
+  try{
+    const res=await fetch("/history"); const data=await res.json();
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="history.json";
+    a.click();
+  }catch(e){console.log(e);}
 };
 </script>
 </body>
