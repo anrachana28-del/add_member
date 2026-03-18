@@ -318,8 +318,17 @@ async function fetchHistory(){
   const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
   Object.values(data).forEach(h=>{
     const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
-    const timeStr = new Date(h.timestamp).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
-    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'} | ${timeStr}</span></li>`;
+    const dateTimeStr = new Date(h.timestamp).toLocaleString('en-US',{
+  timeZone:'Asia/Phnom_Penh',
+  year:'numeric',
+  month:'2-digit',
+  day:'2-digit',
+  hour:'2-digit',
+  minute:'2-digit',
+  second:'2-digit',
+  hour12:true
+});
+    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'} | ${dateTimeStr}</span></li>`;
   });
 }
 setInterval(fetchHistory,6000); fetchHistory();
