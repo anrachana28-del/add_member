@@ -44,6 +44,11 @@ th{background:#11141f;color:#00ff7f;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
 #floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
+
+td.success{color:#00ff7f;font-weight:700;}
+td.failed{color:#ff4c4c;font-weight:700;}
+td.floodwait{color:#ffcc00;font-weight:700;}
+td.skipped{color:#9999ff;font-weight:700;}
 </style>
 </head>
 <body>
@@ -105,7 +110,22 @@ th{background:#11141f;color:#00ff7f;}
 <!-- History -->
 <section id="historyPage" class="page">
 <div class="card-title">History</div>
-<ul id="historyList"></ul>
+<div class="table-responsive">
+  <table>
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Status</th>
+        <th>Account</th>
+        <th>Reason</th>
+        <th>Group</th>
+        <th>Date</th>
+        <th>Time</th>
+      </tr>
+    </thead>
+    <tbody id="historyTable"></tbody>
+  </table>
+</div>
 <button id="downloadHistoryBtn">Download History</button>
 </section>
 
@@ -313,25 +333,70 @@ startAutoAddBtn.onclick=async()=>{
 };
 
 // ===== History =====
-const historyList=document.getElementById("historyList");
+const historyTable = document.getElementById("historyTable");
+
 async function fetchHistory(){
-  const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
-  Object.values(data).forEach(h=>{
-    const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
-    const dateTimeStr = new Date(h.timestamp).toLocaleString('en-US',{
-  timeZone:'Asia/Phnom_Penh',
-  year:'numeric',
-  month:'2-digit',
-  day:'2-digit',
-  hour:'2-digit',
-  minute:'2-digit',
-  second:'2-digit',
-  hour12:true
-});
-    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'} | ${dateTimeStr}</span></li>`;
+  const res = await fetch("/history");
+  const data = await res.json();
+  historyTable.innerHTML = "";
+
+  Object.values(data).forEach(h => {
+
+    // ===== Category =====
+    let category = "success";
+    if(h.status === "failed"){
+      if(h.reason && h.reason.toLowerCase().includes("flood")){
+        category = "flood";
+      } else {
+        category = "failed";
+      }
+    }
+    if(h.status === "skipped"){
+      category = "skipped";
+    }
+
+    // ===== Label + Color =====
+    const label =
+      category==="success" ? "SUCCESS" :
+      category==="failed" ? "ERROR" :
+      category==="flood" ? "FLOOD" :
+      "SKIPPED";
+
+    const colorClass =
+      category==="success" ? "success" :
+      category==="failed" ? "failed" :
+      category==="flood" ? "floodwait" :
+      "skipped";
+
+    // ===== Date & Time =====
+    const d = new Date(h.timestamp);
+    const date = d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
+    const time = d.toLocaleTimeString('en-US',{
+      timeZone:'Asia/Phnom_Penh',
+      hour:'2-digit',
+      minute:'2-digit',
+      second:'2-digit',
+      hour12:true
+    });
+
+    // ===== Target Group =====
+    const groupName = h.targetGroup || 'N/A';
+
+    // ===== Render Row =====
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${h.username || h.user_id}</td>
+      <td class="${colorClass}"><b>${label}</b></td>
+      <td>${h.accountUsed || 'N/A'}</td>
+      <td>${h.reason || 'N/A'}</td>
+      <td>${groupName}</td>
+      <td>${date}</td>
+      <td>${time}</td>
+    `;
+
+    historyTable.appendChild(tr);
   });
 }
-setInterval(fetchHistory,6000); fetchHistory();
 
 const downloadHistoryBtn=document.getElementById("downloadHistoryBtn");
 downloadHistoryBtn.onclick=async()=>{
