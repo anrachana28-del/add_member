@@ -12,6 +12,7 @@ app.use(express.json())
 
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)) }
 
+// ===== Firebase =====
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY,
   authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -20,27 +21,43 @@ const firebaseConfig = {
 initializeApp(firebaseConfig)
 const db = getDatabase()
 
+// ===== Accounts =====
 const accounts = []
 const clients = {}
+
 let i=1
 while(process.env[`TG_ACCOUNT_${i}_PHONE`]){
   const api_id=Number(process.env[`TG_ACCOUNT_${i}_API_ID`])
   const api_hash=process.env[`TG_ACCOUNT_${i}_API_HASH`]
   const session=process.env[`TG_ACCOUNT_${i}_SESSION`]
   const phone=process.env[`TG_ACCOUNT_${i}_PHONE`]
+
   if(!api_id||!api_hash||!session){i++; continue}
-  accounts.push({phone,api_id,api_hash,session,id:`TG_ACCOUNT_${i}`,status:"pending",floodWaitUntil:null})
+
+  accounts.push({
+    phone, api_id, api_hash, session,
+    id:`TG_ACCOUNT_${i}`,
+    status:"pending",
+    floodWaitUntil:null
+  })
   i++
 }
 
+// ===== Client =====
 async function getClient(account){
   if(clients[account.id]) return clients[account.id]
-  const client=new TelegramClient(new StringSession(account.session),account.api_id,account.api_hash,{connectionRetries:5})
+  const client=new TelegramClient(
+    new StringSession(account.session),
+    account.api_id,
+    account.api_hash,
+    {connectionRetries:5}
+  )
   await client.connect()
   clients[account.id]=client
   return client
 }
 
+// ===== Flood Parse =====
 function parseFlood(err){
   const msg=err.message||""
   const m1=msg.match(/FLOOD_WAIT_(\d+)/)
@@ -50,137 +67,243 @@ function parseFlood(err){
   return null
 }
 
-async function checkTGAccount(account){
-  try{
-    const client=await getClient(account)
-    await client.getMe()
-    account.status="active"
-    await update(ref(db,`accounts/${account.id}`),{status:"active",phone:account.phone,lastChecked:Date.now(),floodWaitUntil:null})
-  }catch(err){
-    const wait=parseFlood(err)
-    let status="error", floodUntil=null
-    if(wait){ status="floodwait"; floodUntil=Date.now()+wait*1000; account.floodWaitUntil=floodUntil }
-    await update(ref(db,`accounts/${account.id}`),{status,floodWaitUntil:floodUntil,error:err.message,phone:account.phone,lastChecked:Date.now()})
+// ===== ✅ FIX: Auto Clear FloodWait =====
+async function refreshAccountStatus(account){
+  if(account.floodWaitUntil && account.floodWaitUntil < Date.now()){
+    account.floodWaitUntil = null
+    account.status = "active"
+
+    await update(ref(db, `accounts/${account.id}`), {
+      status: "active",
+      floodWaitUntil: null
+    })
   }
 }
 
-async function autoCheck(){for(const acc of accounts){await checkTGAccount(acc);await sleep(2000)}}
+// ===== Check Account =====
+async function checkTGAccount(account){
+  try{
+    await refreshAccountStatus(account) // ✅ FIX
+
+    const client=await getClient(account)
+    await client.getMe()
+
+    account.status="active"
+    account.floodWaitUntil=null
+
+    await update(ref(db,`accounts/${account.id}`),{
+      status:"active",
+      phone:account.phone,
+      lastChecked:Date.now(),
+      floodWaitUntil:null
+    })
+
+  }catch(err){
+    const wait=parseFlood(err)
+
+    let status="error", floodUntil=null
+
+    if(wait){
+      status="floodwait"
+      floodUntil=Date.now()+wait*1000
+      account.floodWaitUntil=floodUntil
+      account.status="floodwait"
+    }
+
+    await update(ref(db,`accounts/${account.id}`),{
+      status,
+      floodWaitUntil:floodUntil,
+      error:err.message,
+      phone:account.phone,
+      lastChecked:Date.now()
+    })
+  }
+}
+
+// ===== Auto Check =====
+async function autoCheck(){
+  for(const acc of accounts){
+    await refreshAccountStatus(acc) // ✅ FIX
+    await checkTGAccount(acc)
+    await sleep(2000)
+  }
+}
 setInterval(autoCheck,60000)
 autoCheck()
 
-// ========== Scrape members ==========
+// ===== Get Available Account =====
+function getAvailableAccount(){
+  const now = Date.now()
+
+  for(const acc of accounts){
+    if(acc.floodWaitUntil && acc.floodWaitUntil < now){
+      acc.floodWaitUntil = null
+      acc.status = "active"
+    }
+  }
+
+  return accounts.find(a => !a.floodWaitUntil)
+}
+
+// ===== Members =====
 app.post('/members',async(req,res)=>{
   try{
     const {group}=req.body
-    const acc=accounts.find(a=>!a.floodWaitUntil || a.floodWaitUntil<Date.now())
+
+    const acc = getAvailableAccount()
     if(!acc) return res.json({error:"No active account"})
+
     const client=await getClient(acc)
     const entity=await client.getEntity(group)
+
     let offset=0, limit=200, all=[]
+
     while(true){
       const participants=await client.getParticipants(entity,{limit,offset})
       if(!participants.length) break
       all=all.concat(participants)
       offset+=participants.length
     }
-    const members=all.filter(p=>!p.bot).map(p=>({user_id:p.id,username:p.username,access_hash:p.access_hash,avatar:`https://t.me/i/userpic/320/${p.id}.jpg`}))
+
+    const members=all.filter(p=>!p.bot).map(p=>({
+      user_id:p.id,
+      username:p.username,
+      access_hash:p.access_hash,
+      avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
+    }))
+
     res.json(members)
-  }catch(err){res.json({error:err.message})}
+
+  }catch(err){
+    res.json({error:err.message})
+  }
 })
 
-// ========== Add member ==========
-let accountIndex=0
+// ===== Add Member =====
 app.post('/add-member',async(req,res)=>{
   try{
     const {username,user_id,access_hash,targetGroup}=req.body
-    const now=Date.now()
-    const clientAcc=accounts.find(a=>!a.floodWaitUntil || a.floodWaitUntil<now)
-    if(!clientAcc) return res.json({status:"failed",reason:"All accounts FloodWait",accountUsed:"none"})
 
-    // skip silently if missing access_hash or username
-    if(!username && (!user_id || !access_hash)) return res.json({status:"skipped",reason:"missing username/access_hash",accountUsed:"none",silent:true})
+    const clientAcc = getAvailableAccount()
+    if(!clientAcc){
+      return res.json({
+        status:"failed",
+        reason:"All accounts FloodWait",
+        accountUsed:"none"
+      })
+    }
+
+    if(!username && (!user_id || !access_hash)){
+      return res.json({
+        status:"skipped",
+        reason:"missing username/access_hash",
+        accountUsed:"none",
+        silent:true
+      })
+    }
 
     const client=await getClient(clientAcc)
     const group=await client.getEntity(targetGroup)
 
-    // check history
-    const snap=await get(ref(db,'history'))
-    const historyData=snap.val()||{}
-    const alreadyAdded=Object.values(historyData).some(h=>(h.username===username||h.user_id===user_id) && h.status==="success")
-
-    // check target group
-    let alreadyInGroup=false
-    try{
-      const participants=await client.getParticipants(group)
-      alreadyInGroup=participants.some(p=>p.id===user_id)
-    }catch(err){}
-
-    if(alreadyAdded||alreadyInGroup){
-      const reason=alreadyAdded?"already in history":"already in group"
-      await push(ref(db,'history'),{username,user_id,status:"skipped",reason,accountUsed:"none",timestamp:Date.now()})
-      return res.json({status:"skipped",reason,accountUsed:"none"})
-    }
-
-    // prepare user entity
     let userEntity
     if(username) userEntity=await client.getEntity(username)
-    else userEntity=new Api.InputUser({userId:user_id,accessHash:BigInt(access_hash)})
+    else userEntity=new Api.InputUser({
+      userId:user_id,
+      accessHash:BigInt(access_hash)
+    })
 
-    // attempt add
-    let status="failed", reason="unknown", moveNextAccount=false
+    let status="failed", reason="unknown"
+
     try{
-      await client.invoke(new Api.channels.InviteToChannel({channel:group,users:[userEntity]}))
+      await client.invoke(new Api.channels.InviteToChannel({
+        channel:group,
+        users:[userEntity]
+      }))
+
       status="success"
       reason="joined"
+
       await sleep(30000)
-      moveNextAccount=true
+
     }catch(err){
       const wait=parseFlood(err)
+
       if(wait){
         const until=Date.now()+wait*1000
+
         clientAcc.floodWaitUntil=until
         clientAcc.status="floodwait"
-        await update(ref(db,`accounts/${clientAcc.id}`),{status:"floodwait",floodWaitUntil:until})
+
+        await update(ref(db,`accounts/${clientAcc.id}`),{
+          status:"floodwait",
+          floodWaitUntil:until
+        })
+
         const ready=new Date(until).toLocaleString()
         reason=`FloodWait ${wait}s | Ready ${ready}`
-        moveNextAccount=true
+
       }else{
         reason=err.message
-        moveNextAccount=false
       }
     }
 
-    if(moveNextAccount) accountIndex++
-    await push(ref(db,'history'),{username,user_id,status,reason,accountUsed:clientAcc.id,timestamp:Date.now()})
+    await push(ref(db,'history'),{
+      username,user_id,status,reason,
+      accountUsed:clientAcc.id,
+      timestamp:Date.now()
+    })
+
     res.json({status,reason,accountUsed:clientAcc.id})
 
-  }catch(err){res.json({status:"failed",reason:err.message,accountUsed:"unknown"})}
+  }catch(err){
+    res.json({
+      status:"failed",
+      reason:err.message,
+      accountUsed:"unknown"
+    })
+  }
 })
 
-// ========== Account status ==========
+// ===== Account Status =====
 app.get('/account-status',async(req,res)=>{
   const snap=await get(ref(db,'accounts'))
   const now=Date.now()
   const data=snap.val()||{}
+
   for(const id in data){
     const a=data[id]
+
     if(a.floodWaitUntil){
       const remain=a.floodWaitUntil-now
-      if(remain>0) a.readyTime=new Date(a.floodWaitUntil).toLocaleString()
+
+      if(remain<=0){
+        a.status="active"
+        a.floodWaitUntil=null
+
+        await update(ref(db,`accounts/${id}`),{
+          status:"active",
+          floodWaitUntil:null
+        })
+      }else{
+        a.readyTime=new Date(a.floodWaitUntil).toLocaleString()
+        a.remaining=remain
+      }
     }
   }
+
   res.json(data)
 })
 
-// ========== History ==========
+// ===== History =====
 app.get('/history',async(req,res)=>{
   const snap=await get(ref(db,'history'))
   res.json(snap.val()||{})
 })
 
-// ========== Frontend ==========
+// ===== Frontend =====
 const __filename=fileURLToPath(import.meta.url)
 const __dirname=path.dirname(__filename)
+
 app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'index.html')))
 
 const PORT=process.env.PORT||3000
