@@ -132,25 +132,24 @@ async function fetchAccounts(){
     Object.keys(data).forEach(id=>{
       const acc=data[id];
       let floodText="-", countdownClass="green";
-      if(acc.floodWaitUntil){
-        const remain=Math.floor((acc.floodWaitUntil-now)/1000);
-        if(remain>0){
-          const dt=new Date(acc.floodWaitUntil);
-          const h=dt.getHours().toString().padStart(2,"0");
-          const m=dt.getMinutes().toString().padStart(2,"0");
-          const s=dt.getSeconds().toString().padStart(2,"0");
-          floodText=`${dt.toLocaleDateString()} ${h}:${m}:${s}`;
-          countdownClass = "red";
-        }
+
+      if(acc.floodWaitUntil && acc.floodWaitUntil>now){
+        const remain = Math.floor((acc.floodWaitUntil-now)/1000);
+        floodText = `${remain}s remaining`;
+        countdownClass = "red";
       }
+
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
+      tr.innerHTML=`<td>${id}</td>
+                    <td>${acc.phone}</td>
+                    <td>${acc.status}</td>
+                    <td class="countdown ${countdownClass}">${floodText}</td>
+                    <td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
       accountsTable.appendChild(tr);
     });
   }catch(e){console.log(e);}
 }
 setInterval(fetchAccounts,1000); fetchAccounts();
-
 // ===== Accounts dropdown + FloodWait =====
 const accountSelect=document.getElementById("accountSelect");
 const startAutoAddBtn=document.getElementById("startAutoAddBtn");
@@ -161,27 +160,31 @@ async function loadAccountsDropdown(){
     const data=await res.json();
     accountSelect.innerHTML="";
     let anyFlood=false;
+    const now = Date.now();
+
     Object.keys(data).forEach(id=>{
       const acc=data[id];
       const option=document.createElement("option");
       option.value=id;
       option.text=`${acc.phone} (${acc.status})`;
-      if(acc.floodWaitUntil && acc.floodWaitUntil>Date.now()){
+
+      // Disable if in FloodWait
+      if(acc.floodWaitUntil && acc.floodWaitUntil>now){
         option.disabled=true;
         anyFlood=true;
+        const remain = Math.floor((acc.floodWaitUntil-now)/1000);
+        option.text += ` [${remain}s]`;
       }
       accountSelect.appendChild(option);
     });
-    if(anyFlood){
-      startAutoAddBtn.disabled=true;
-      floodAlert.style.display="block";
-    } else {
-      startAutoAddBtn.disabled=false;
-      floodAlert.style.display="none";
-    }
+
+    // Flood alert + disable Add button
+    startAutoAddBtn.disabled = anyFlood;
+    floodAlert.style.display = anyFlood ? "block" : "none";
+
   }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,3000); loadAccountsDropdown();
+setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
 
 // ===== Auto Add Members =====
 const autoAddList=document.getElementById("autoAddList"),
