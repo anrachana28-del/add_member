@@ -67,12 +67,11 @@ function parseFlood(err){
   return null
 }
 
-// ===== ✅ FIX: Auto Clear FloodWait =====
+// ===== ✅ Auto Clear FloodWait =====
 async function refreshAccountStatus(account){
   if(account.floodWaitUntil && account.floodWaitUntil < Date.now()){
     account.floodWaitUntil = null
     account.status = "active"
-
     await update(ref(db, `accounts/${account.id}`), {
       status: "active",
       floodWaitUntil: null
@@ -83,8 +82,7 @@ async function refreshAccountStatus(account){
 // ===== Check Account =====
 async function checkTGAccount(account){
   try{
-    await refreshAccountStatus(account) // ✅ FIX
-
+    await refreshAccountStatus(account)
     const client=await getClient(account)
     await client.getMe()
 
@@ -123,7 +121,7 @@ async function checkTGAccount(account){
 // ===== Auto Check =====
 async function autoCheck(){
   for(const acc of accounts){
-    await refreshAccountStatus(acc) // ✅ FIX
+    await refreshAccountStatus(acc)
     await checkTGAccount(acc)
     await sleep(2000)
   }
@@ -134,14 +132,12 @@ autoCheck()
 // ===== Get Available Account =====
 function getAvailableAccount(){
   const now = Date.now()
-
   for(const acc of accounts){
     if(acc.floodWaitUntil && acc.floodWaitUntil < now){
       acc.floodWaitUntil = null
       acc.status = "active"
     }
   }
-
   return accounts.find(a => !a.floodWaitUntil)
 }
 
@@ -149,15 +145,12 @@ function getAvailableAccount(){
 app.post('/members',async(req,res)=>{
   try{
     const {group}=req.body
-
     const acc = getAvailableAccount()
     if(!acc) return res.json({error:"No active account"})
-
     const client=await getClient(acc)
     const entity=await client.getEntity(group)
 
     let offset=0, limit=200, all=[]
-
     while(true){
       const participants=await client.getParticipants(entity,{limit,offset})
       if(!participants.length) break
@@ -173,7 +166,6 @@ app.post('/members',async(req,res)=>{
     }))
 
     res.json(members)
-
   }catch(err){
     res.json({error:err.message})
   }
@@ -205,16 +197,39 @@ app.post('/add-member',async(req,res)=>{
     const client=await getClient(clientAcc)
     const group=await client.getEntity(targetGroup)
 
-    let userEntity
-    if(username) userEntity=await client.getEntity(username)
-    else userEntity=new Api.InputUser({
-      userId:user_id,
-      accessHash:BigInt(access_hash)
-    })
+    // ===== Check history
+    const histSnap = await get(ref(db,'history'))
+    const histList = Object.values(histSnap.val()||{})
+    const alreadyHistory = histList.some(h => (h.username===username || h.user_id===user_id) && h.status==="success")
+
+    // ===== Check target group
+    let alreadyInGroup = false
+    try{
+      let userEntity
+      if(username) userEntity = await client.getEntity(username)
+      else userEntity = new Api.InputUser({ userId:user_id, accessHash:BigInt(access_hash) })
+      await client.getParticipant(group,userEntity)
+      alreadyInGroup = true
+    }catch(e){
+      alreadyInGroup = false
+    }
+
+    if(alreadyHistory || alreadyInGroup){
+      return res.json({
+        status:"skipped",
+        reason:"already in history or target group",
+        accountUsed:"none",
+        silent:true
+      })
+    }
 
     let status="failed", reason="unknown"
 
     try{
+      let userEntity
+      if(username) userEntity = await client.getEntity(username)
+      else userEntity = new Api.InputUser({ userId:user_id, accessHash:BigInt(access_hash) })
+
       await client.invoke(new Api.channels.InviteToChannel({
         channel:group,
         users:[userEntity]
@@ -222,15 +237,12 @@ app.post('/add-member',async(req,res)=>{
 
       status="success"
       reason="joined"
-
       await sleep(30000)
 
     }catch(err){
       const wait=parseFlood(err)
-
       if(wait){
         const until=Date.now()+wait*1000
-
         clientAcc.floodWaitUntil=until
         clientAcc.status="floodwait"
 
@@ -241,7 +253,6 @@ app.post('/add-member',async(req,res)=>{
 
         const ready=new Date(until).toLocaleString()
         reason=`FloodWait ${wait}s | Ready ${ready}`
-
       }else{
         reason=err.message
       }
@@ -272,14 +283,11 @@ app.get('/account-status',async(req,res)=>{
 
   for(const id in data){
     const a=data[id]
-
     if(a.floodWaitUntil){
       const remain=a.floodWaitUntil-now
-
       if(remain<=0){
         a.status="active"
         a.floodWaitUntil=null
-
         await update(ref(db,`accounts/${id}`),{
           status:"active",
           floodWaitUntil:null
@@ -290,7 +298,6 @@ app.get('/account-status',async(req,res)=>{
       }
     }
   }
-
   res.json(data)
 })
 
@@ -303,7 +310,6 @@ app.get('/history',async(req,res)=>{
 // ===== Frontend =====
 const __filename=fileURLToPath(import.meta.url)
 const __dirname=path.dirname(__filename)
-
 app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'index.html')))
 
 const PORT=process.env.PORT||3000
