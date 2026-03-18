@@ -128,12 +128,10 @@ async function fetchAccounts(){
     Object.keys(data).forEach(id=>{
       const acc=data[id];
       let floodText="-", countdownClass="green";
-      if(acc.floodWaitUntil && acc.floodWaitUntil>now){
-        const remain=Math.floor((acc.floodWaitUntil-now)/1000);
-        const readyTime = new Date(acc.floodWaitUntil).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
-        floodText=`${remain}s remaining | Ready: ${readyTime}`;
-        countdownClass="red";
-      }
+    if(acc.floodWaitUntil && acc.floodWaitUntil>now){
+  floodText = `<span class="live-countdown" data-time="${acc.floodWaitUntil}"></span>`;
+  countdownClass="red";
+}
       const lastChecked = new Date(acc.lastChecked||now).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
       const tr=document.createElement("tr");
       tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
@@ -141,6 +139,23 @@ async function fetchAccounts(){
     });
   }catch(e){console.log(e);}
 }
+function updateCountdowns(){
+  const now = Date.now();
+
+  document.querySelectorAll(".live-countdown").forEach(el=>{
+    const end = parseInt(el.dataset.time);
+    const remain = Math.max(0, Math.floor((end - now)/1000));
+
+    const readyTime = new Date(end).toLocaleTimeString('en-US',{
+      timeZone:'Asia/Phnom_Penh',
+      hour12:true
+    });
+
+    el.innerText = `${remain}s remaining | Ready: ${readyTime}`;
+  });
+}
+
+setInterval(updateCountdowns,1000);
 setInterval(fetchAccounts,1000); fetchAccounts();
 
 // ===== Accounts dropdown + FloodWait =====
@@ -169,15 +184,20 @@ async function loadAccountsDropdown(){
       }
       accountSelect.appendChild(option);
     });
-    startAutoAddBtn.disabled = anyFlood;
-    floodAlert.style.display = anyFlood ? "block" : "none";
+    startAutoAddBtn.disabled = false;
+floodAlert.style.display = anyFlood ? "block" : "none";
   }catch(e){console.log(e);}
 }
 setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
 
 // ===== Console Log Auto Scroll =====
-function logConsole(msg){
-  autoAddConsole.innerHTML += msg + "<br>";
+function logConsole(msg, type="info"){
+  let color = "#fff";
+  if(type==="success") color="#00ff7f";
+  if(type==="error") color="#ff4c4c";
+  if(type==="warn") color="#ffcc00";
+
+  autoAddConsole.innerHTML += `<span style="color:${color}">${msg}</span><br>`;
   autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
 
@@ -207,16 +227,26 @@ startAutoAddBtn.onclick=async()=>{
   autoAddList.innerHTML=""; counter.innerText=`0 / ${members.length}`; progress.style.width=`0%`;
 
   function getNextAvailableAccount(startIndex){
-    const now = Date.now();
-    for(let i=0;i<accountsList.length;i++){
-      let idx = (startIndex + i) % accountsList.length;
-      const acc = accData[accountsList[idx]];
-      if(acc.status === "active" && (!acc.floodWaitUntil || acc.floodWaitUntil <= now)){
+  const now = Date.now();
+  let best = -1;
+
+  for(let i=0;i<accountsList.length;i++){
+    let idx = (startIndex + i) % accountsList.length;
+    const acc = accData[accountsList[idx]];
+
+    if(acc.status === "active"){
+      if(!acc.floodWaitUntil || acc.floodWaitUntil <= now){
         return idx;
       }
+
+      if(best === -1 || acc.floodWaitUntil < accData[accountsList[best]].floodWaitUntil){
+        best = idx;
+      }
     }
-    return -1;
   }
+
+  return best;
+}
 
   const batchSize = 5; // PRO MAX batch add
   for(let i=0;i<members.length;i+=batchSize){
@@ -232,12 +262,23 @@ startAutoAddBtn.onclick=async()=>{
       }
 
       let nextAccIdx=getNextAvailableAccount(accIndex);
-      if(nextAccIdx===-1){ 
-          autoAddStatus.innerText="All accounts FloodWait. Waiting..."; 
-          await new Promise(r=>setTimeout(r,5000)); 
-          nextAccIdx=getNextAvailableAccount(accIndex); 
-          if(nextAccIdx===-1) break; 
-      }
+      if(nextAccIdx===-1){
+  let minWait = Infinity;
+  const now = Date.now();
+
+  Object.values(accData).forEach(acc=>{
+    if(acc.floodWaitUntil){
+      const wait = acc.floodWaitUntil - now;
+      if(wait > 0 && wait < minWait) minWait = wait;
+    }
+  });
+
+  const waitSec = Math.ceil(minWait/1000);
+  autoAddStatus.innerText = `All accounts FloodWait. Waiting ${waitSec}s...`;
+
+  await new Promise(r=>setTimeout(r, minWait));
+  continue;
+}
       accIndex=nextAccIdx;
       const currentAccount=accountsList[accIndex];
 
