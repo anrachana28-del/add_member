@@ -328,45 +328,80 @@ startAutoAddBtn.onclick = async()=>{
 };
 
 // ===== History Table =====
-// ===== History Table =====
-const historyTable=document.getElementById("historyTable");
-async function fetchHistory(){
-  const res=await fetch("/history");
-  const data=await res.json();
-  historyTable.innerHTML="";
-  Object.values(data).forEach(h=>{
-    let category="success";
+const historyTable = document.getElementById("historyTable");
+
+async function fetchHistory() {
+  const res = await fetch("/history");
+  const data = await res.json();
+  historyTable.innerHTML = "";
+
+  Object.values(data).forEach(h => {
+    let category = "success";
     let reasonText = h.reason || "";
-    if(h.status==="failed"){
-      if(reasonText.toLowerCase().includes("flood")) {
-        category="floodwait"; // FloodWait color/style
-        reasonText = reasonText.replace(/FloodWait.*Ready.*$/i,"FloodWait"); // កាត់ countdown
+
+    if (h.status === "failed") {
+      if (reasonText.toLowerCase().includes("flood")) {
+        category = "floodwait";
+        // បង្ហាញ Date + Time របស់ FloodWait
+        const match = reasonText.match(/FloodWait\s*(\d+)?/i);
+        const readyTimestamp = h.floodWaitUntil || h.timestamp;
+        const readyDate = new Date(readyTimestamp).toLocaleString('en-US', {
+          timeZone: 'Asia/Phnom_Penh',
+          hour12: true,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+        reasonText = `FloodWait | Ready: ${readyDate}`;
       } else {
-        category="failed";
+        category = "failed";
       }
     }
-    if(h.status==="skipped") category="skipped";
 
-    const label= category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="floodwait"?"FLOOD":"SKIPPED";
-    const colorClass= category==="success"?"success":category==="failed"?"failed":category==="floodwait"?"floodwait":"skipped";
+    if (h.status === "skipped") category = "skipped";
 
-    const d=new Date(h.timestamp);
-    const date=d.toLocaleDateString('en-GB',{timeZone:'Asia/Phnom_Penh'});
-    const time=d.toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
-    const groupName=h.targetGroup||'N/A';
+    const label =
+      category === "success" ? "SUCCESS" :
+      category === "failed" ? "ERROR" :
+      category === "floodwait" ? "FLOOD" :
+      "SKIPPED";
 
-    const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${h.username||h.user_id}</td>
-                    <td class="${colorClass}">${label}</td>
-                    <td>${h.accountUsed}</td>
-                    <td>${reasonText}</td>
-                    <td>${groupName}</td>
-                    <td>${date}</td>
-                    <td>${time}</td>`;
+    const colorClass =
+      category === "success" ? "success" :
+      category === "failed" ? "failed" :
+      category === "floodwait" ? "floodwait" :
+      "skipped";
+
+    const d = new Date(h.timestamp);
+    const date = d.toLocaleDateString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
+    const time = d.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Phnom_Penh',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+
+    const groupName = h.targetGroup || 'N/A';
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${h.username || h.user_id}</td>
+      <td class="${colorClass}">${label}</td>
+      <td>${h.accountUsed}</td>
+      <td>${reasonText}</td>
+      <td>${groupName}</td>
+      <td>${date}</td>
+      <td>${time}</td>
+    `;
     historyTable.appendChild(tr);
   });
 }
-setInterval(fetchHistory,2000); fetchHistory();
+setInterval(fetchHistory, 2000);
+fetchHistory();
 </script>
 </body>
 </html>
