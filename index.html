@@ -338,51 +338,32 @@ const historyTable = document.getElementById("historyTable");
 async function fetchHistory(){
   const res = await fetch("/history");
   const data = await res.json();
+  console.log("Fetched history data:", data); // <-- add this
+
   historyTable.innerHTML = "";
 
-  Object.values(data).forEach(h => {
+  const histList = Array.isArray(data) ? data : Object.values(data);
 
-    // ===== Category =====
+  histList.forEach(h => {
     let category = "success";
     if(h.status === "failed"){
-      if(h.reason && h.reason.toLowerCase().includes("flood")){
-        category = "flood";
-      } else {
-        category = "failed";
-      }
+      category = (h.reason && h.reason.toLowerCase().includes("flood")) ? "flood" : "failed";
     }
-    if(h.status === "skipped"){
-      category = "skipped";
-    }
+    if(h.status === "skipped") category = "skipped";
 
-    // ===== Label + Color =====
-    const label =
-      category==="success" ? "SUCCESS" :
-      category==="failed" ? "ERROR" :
-      category==="flood" ? "FLOOD" :
-      "SKIPPED";
+    const label = category==="success" ? "SUCCESS" : category==="failed" ? "ERROR" : category==="flood" ? "FLOOD" : "SKIPPED";
+    const colorClass = category==="success" ? "success" : category==="failed" ? "failed" : category==="flood" ? "floodwait" : "skipped";
 
-    const colorClass =
-      category==="success" ? "success" :
-      category==="failed" ? "failed" :
-      category==="flood" ? "floodwait" :
-      "skipped";
-
-    // ===== Date & Time =====
-    const d = new Date(h.timestamp);
+    const ts = h.timestamp > 9999999999 ? h.timestamp : h.timestamp*1000;
+    const d = new Date(ts);
     const date = d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
     const time = d.toLocaleTimeString('en-US',{
       timeZone:'Asia/Phnom_Penh',
-      hour:'2-digit',
-      minute:'2-digit',
-      second:'2-digit',
-      hour12:true
+      hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true
     });
 
-    // ===== Target Group =====
     const groupName = h.targetGroup || 'N/A';
 
-    // ===== Render Row =====
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${h.username || h.user_id}</td>
@@ -393,7 +374,6 @@ async function fetchHistory(){
       <td>${date}</td>
       <td>${time}</td>
     `;
-
     historyTable.appendChild(tr);
   });
 }
