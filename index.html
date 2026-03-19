@@ -342,8 +342,7 @@ async function fetchHistory() {
     if (h.status === "failed") {
       if (reasonText.toLowerCase().includes("flood")) {
         category = "floodwait";
-        // បង្ហាញ Date + Time របស់ FloodWait
-        const match = reasonText.match(/FloodWait\s*(\d+)?/i);
+        // ប្រើ timestamp នៃ FloodWait ពី history ឬ fallback
         const readyTimestamp = h.floodWaitUntil || h.timestamp;
         const readyDate = new Date(readyTimestamp).toLocaleString('en-US', {
           timeZone: 'Asia/Phnom_Penh',
@@ -400,7 +399,10 @@ async function fetchHistory() {
     historyTable.appendChild(tr);
   });
 }
+
+// Refresh History every 2 seconds
 setInterval(fetchHistory, 2000);
+
 fetchHistory();
 </script>
 </body>
