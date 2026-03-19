@@ -44,11 +44,11 @@ th{background:#11141f;color:#00ff7f;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
 #floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
-
 td.success{color:#00ff7f;font-weight:700;}
 td.failed{color:#ff4c4c;font-weight:700;}
 td.floodwait{color:#ffcc00;font-weight:700;}
 td.skipped{color:#9999ff;font-weight:700;}
+.flood-countdown{font-weight:700;color:#ffcc00;}
 </style>
 </head>
 <body>
@@ -65,7 +65,6 @@ td.skipped{color:#9999ff;font-weight:700;}
 <!-- Accounts -->
 <section id="accountsPage" class="page active">
 <div class="card-title">Accounts Status</div>
-<div id="floodBanner" class="floodwait" style="display:none;padding:6px;margin-bottom:10px;text-align:center;">FloodWait Active 🚫</div>
 <div class="table-responsive">
 <table>
 <thead>
@@ -75,6 +74,7 @@ td.skipped{color:#9999ff;font-weight:700;}
 </thead>
 <tbody id="accountsTable"></tbody>
 </table>
+<button id="refreshAccountsBtn">Refresh Accounts</button>
 </div>
 </section>
 
@@ -83,6 +83,7 @@ td.skipped{color:#9999ff;font-weight:700;}
 <div class="card-title">Auto Add Members</div>
 <label for="accountSelect">Select Account (optional):</label>
 <select id="accountSelect"></select>
+<div id="floodAlert">FloodWait Active 🚫</div>
 <input id="sourceGroupInput" placeholder="Source Group">
 <input id="targetGroupInput" placeholder="Target Group">
 <button id="startAutoAddBtn">Start Auto-Add</button>
@@ -121,7 +122,6 @@ td.skipped{color:#9999ff;font-weight:700;}
         <th>Group</th>
         <th>Date</th>
         <th>Time</th>
-        <th>FloodWait</th>
       </tr>
     </thead>
     <tbody id="historyTable"></tbody>
@@ -135,7 +135,8 @@ td.skipped{color:#9999ff;font-weight:700;}
 <script>
 // ===== Navigation =====
 document.querySelectorAll(".nav-btn").forEach(btn=>{
-  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active")); document.getElementById(btn.dataset.page).classList.add("active");}
+  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  document.getElementById(btn.dataset.page).classList.add("active");}
 });
 
 // ===== Helpers =====
@@ -145,162 +146,144 @@ function secondsToHHMMSS(seconds){
   const s=seconds%60;
   return [h,m,s].map(v=>v.toString().padStart(2,'0')).join(':');
 }
+function parseFloodWait(reason){
+  // Parse "FloodWait 403s | Ready 3/19/2026, 3:41:52 AM"
+  if(!reason) return 0;
+  const match = reason.match(/FloodWait\s+(\d+)s/i);
+  return match?Number(match[1]):0;
+}
 
 // ===== Accounts Table =====
 const accountsTable=document.getElementById("accountsTable");
-const floodBanner=document.getElementById("floodBanner");
-let accountsCache={};
+const accountFloodTimers={};
 
 async function fetchAccounts(){
   try{
     const res=await fetch("/account-status"); if(!res.ok) return;
     const data=await res.json();
     const now=Date.now();
-    accountsCache=data;
     accountsTable.innerHTML="";
-    let anyFlood=false;
     Object.keys(data).forEach(id=>{
       const acc=data[id];
+      const tr=document.createElement("tr"); tr.dataset.id=id;
+
+      // Countdown
       let floodText="-", countdownClass="green";
       if(acc.floodWaitUntil && acc.floodWaitUntil>now){
         const remain=Math.floor((acc.floodWaitUntil-now)/1000);
-        floodText = secondsToHHMMSS(remain);
-        countdownClass="red";
-        anyFlood=true;
+        accountFloodTimers[id] = remain;
+        floodText = secondsToHHMMSS(remain); countdownClass="red";
       }
       const lastChecked = new Date(acc.lastChecked||now).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
-      const tr=document.createElement("tr");
       tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
       accountsTable.appendChild(tr);
     });
-    floodBanner.style.display = anyFlood ? "block" : "none";
   }catch(e){console.log(e);}
 }
-setInterval(fetchAccounts,1000); fetchAccounts();
+document.getElementById("refreshAccountsBtn").onclick = fetchAccounts;
+fetchAccounts();
 
-// ===== Accounts dropdown =====
+// Dropdown + FloodWait
 const accountSelect=document.getElementById("accountSelect");
 const startAutoAddBtn=document.getElementById("startAutoAddBtn");
-
+const floodAlert=document.getElementById("floodAlert");
 async function loadAccountsDropdown(){
   try{
-    const now = Date.now();
+    const res=await fetch("/account-status"); if(!res.ok) return;
+    const data=await res.json();
     accountSelect.innerHTML="";
     let anyFlood=false;
-    Object.keys(accountsCache).forEach(id=>{
-      const acc = accountsCache[id];
+    const now = Date.now();
+    Object.keys(data).forEach(id=>{
+      const acc=data[id];
       const option=document.createElement("option");
       option.value=id; option.text=`${acc.phone} (${acc.status})`;
       if(acc.floodWaitUntil && acc.floodWaitUntil>now){
-        option.disabled=true;
-        anyFlood=true;
-        option.text+=` [${secondsToHHMMSS(Math.floor((acc.floodWaitUntil-now)/1000))}]`;
+        option.disabled=true; anyFlood=true;
+        const remain = Math.floor((acc.floodWaitUntil-now)/1000);
+        option.text += ` [${secondsToHHMMSS(remain)}]`;
       }
       accountSelect.appendChild(option);
     });
     startAutoAddBtn.disabled = false;
-    floodBanner.style.display = anyFlood ? "block" : "none";
+    floodAlert.style.display = anyFlood ? "block" : "none";
   }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
+loadAccountsDropdown();
 
-// ===== Auto Add Members =====
-const autoAddList=document.getElementById("autoAddList"),
-      counter=document.getElementById("autoAddCounter"),
-      progress=document.getElementById("autoAddProgress"),
-      autoAddStatus=document.getElementById("autoAddStatus"),
-      loading=document.getElementById("loading"),
-      sourceGroupInput=document.getElementById("sourceGroupInput"),
-      targetGroupInput=document.getElementById("targetGroupInput"),
-      autoAddConsole=document.getElementById("autoAddConsole");
-
-function logConsole(msg,type="info"){
-  let color="#fff";
-  if(type==="success") color="#00ff7f";
-  if(type==="error") color="#ff4c4c";
-  if(type==="warn") color="#ffcc00";
-  autoAddConsole.innerHTML += `<span style="color:${color}">${msg}</span><br>`;
-  autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
-}
-
-// ===== History Table with FloodWait Countdown =====
-const historyTable=document.getElementById("historyTable");
-let historyDataCache={};
-
-async function fetchHistory(){
-  const res=await fetch("/history"); 
-  const data=await res.json();
-  historyDataCache=data;
-  renderHistoryTable();
-}
-
-function renderHistoryTable(){
-  historyTable.innerHTML="";
-  const now = Date.now();
-  Object.values(historyDataCache).forEach(h=>{
-    let category="success"; let countdownText="-";
-    if(h.status==="failed"){ 
-      if(h.reason && h.reason.toLowerCase().includes("flood")) category="flood"; 
-      else category="failed"; 
-    }
-    if(h.status==="skipped") category="skipped";
-    let label=category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="flood"?"FLOOD":"SKIPPED";
-    let colorClass=category==="success"?"success":category==="failed"?"failed":category==="flood"?"floodwait":"skipped";
-    let reasonText=h.reason||"";
-
-    const floodMatch = reasonText.match(/FloodWait\s*\|\s*Time:\s*(\d+)/i);
-    if(floodMatch){
-      const waitSec = Number(floodMatch[1]);
-      const endTime = (h.floodUntil || 0) || (h.timestamp + waitSec*1000);
-      const remainingSec = Math.max(Math.floor((endTime-now)/1000),0);
-      countdownText = remainingSec>0 ? secondsToHHMMSS(remainingSec) : "0:00:00";
-    }
-
-    const d=new Date(h.timestamp);
-    const date=d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
-    const time=d.toLocaleTimeString('en-US',{ timeZone:'Asia/Phnom_Penh', hour12:true });
-    const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${h.username||h.user_id}</td>
-                  <td class="${colorClass}">${label}</td>
-                  <td>${h.accountUsed||''}</td>
-                  <td>${reasonText}</td>
-                  <td>${h.group||''}</td>
-                  <td>${date}</td>
-                  <td>${time}</td>
-                  <td class="countdown floodwait">${countdownText}</td>`;
-    historyTable.appendChild(tr);
-  });
-}
-
-// Update countdown every second
+// ===== Countdown update =====
 setInterval(()=>{
-  const now = Date.now();
-  document.querySelectorAll("#historyTable tr").forEach((tr,index)=>{
-    const h = Object.values(historyDataCache)[index];
-    if(!h) return;
-    const tdCountdown = tr.querySelector("td.countdown");
-    if(tdCountdown && h.reason && h.reason.toLowerCase().includes("flood")){
-      const endTime = (h.floodUntil || 0) || (h.timestamp +  parseInt(h.reason.match(/FloodWait\s*\|\s*Time:\s*(\d+)/i)?.[1]||0)*1000);
-      const remainingSec = Math.max(Math.floor((endTime - now)/1000),0);
-      tdCountdown.innerText = remainingSec>0 ? secondsToHHMMSS(remainingSec) : "0:00:00";
+  Object.keys(accountFloodTimers).forEach(id=>{
+    if(accountFloodTimers[id]>0){
+      accountFloodTimers[id]--;
+      const td=document.querySelector(`#accountsTable tr[data-id='${id}'] .countdown`);
+      if(td) td.innerText=secondsToHHMMSS(accountFloodTimers[id]);
     }
   });
 },1000);
 
+// ===== History Table =====
+const historyTable=document.getElementById("historyTable");
+const historyFloodTimers={};
+async function fetchHistory(){
+  try{
+    const res=await fetch("/history"); const data=await res.json();
+    historyTable.innerHTML="";
+    Object.values(data).forEach((h,index)=>{
+      let category="success";
+      if(h.status==="failed"){
+        if(h.reason && h.reason.toLowerCase().includes("flood")) category="flood"; else category="failed";
+      }
+      if(h.status==="skipped") category="skipped";
+      let label=category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="flood"?"FLOOD":"SKIPPED";
+      let colorClass=category==="success"?"success":category==="failed"?"failed":category==="flood"?"floodwait":"skipped";
+
+      const d=new Date(h.timestamp);
+      const date=d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
+      const time=d.toLocaleTimeString('en-US',{ timeZone:'Asia/Phnom_Penh', hour12:true });
+      const groupName=h.targetGroup||'N/A';
+
+      const floodSec=parseFloodWait(h.reason);
+      const rowId=`histRow${index}`;
+      const tr=document.createElement("tr"); tr.id=rowId;
+      tr.innerHTML=`<td>${h.username||h.user_id}</td>
+                    <td class="${colorClass}"><b>${label}</b></td>
+                    <td>${h.accountUsed||'N/A'}</td>
+                    <td class="${floodSec>0?'flood-countdown':''}">${floodSec>0?secondsToHHMMSS(floodSec):h.reason||''}</td>
+                    <td>${groupName}</td>
+                    <td>${date}</td>
+                    <td>${time}</td>`;
+      historyTable.appendChild(tr);
+      if(floodSec>0) historyFloodTimers[rowId]=floodSec;
+    });
+  }catch(e){console.log(e);}
+}
+setInterval(()=>{
+  Object.keys(historyFloodTimers).forEach(rowId=>{
+    if(historyFloodTimers[rowId]>0){
+      historyFloodTimers[rowId]--;
+      const td=document.querySelector(`#${rowId} .flood-countdown`);
+      if(td) td.innerText=secondsToHHMMSS(historyFloodTimers[rowId]);
+    }
+  });
+},1000);
+setInterval(fetchHistory,5000);
 fetchHistory();
-setInterval(fetchHistory,10000);
 
 // ===== Download History =====
 document.getElementById("downloadHistoryBtn").onclick=()=>{
-  const rows = [['User','Status','Account','Reason','Group','Date','Time','FloodWait']];
-  document.querySelectorAll("#historyTable tr").forEach(tr=>{
-    const cells = [...tr.querySelectorAll("td")].map(td=>td.innerText);
-    if(cells.length) rows.push(cells);
+  const rows=document.querySelectorAll("#historyTable tr");
+  let csv="User,Status,Account,Reason,Group,Date,Time\n";
+  rows.forEach(r=>{
+    const cols=r.querySelectorAll("td");
+    if(cols.length){
+      csv+=Array.from(cols).map(c=>c.innerText.replace(/\n/g,"")).join(",")+"\n";
+    }
   });
-  const csv = rows.map(r=>r.join(",")).join("\n");
-  const blob = new Blob([csv],{type:"text/csv"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href=url; a.download="history.csv"; a.click(); URL.revokeObjectURL(url);
+  const blob=new Blob([csv],{type:"text/csv"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="history.csv"; a.click();
 };
 </script>
 </body>
