@@ -245,7 +245,7 @@ startAutoAddBtn.onclick=async()=>{
 
     // ✅ Skip
     if(targetSet.has(key)){
-      logConsole(`[SKIP ${nowTime}] ${key} already in TARGET`);
+      logConsole(`[SKIP ${nowTime}] ${key} aready in group`);
       const li=document.createElement("li");
       li.innerHTML=`${key} → <span class="skipped">skipped</span> (aready in group)`;
       autoAddList.appendChild(li);
