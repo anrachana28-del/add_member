@@ -32,6 +32,10 @@ button:disabled{background:#ff4c4c;color:#fff;cursor:not-allowed;}
 .red{color:#ff4c4c;}
 .progress-bar{background:#11141f;height:14px;border-radius:10px;margin-top:10px;}
 .progress{background:#00ff7f;height:14px;width:0%;border-radius:10px;transition:width 0.3s;}
+.table-responsive{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;margin-bottom:10px;}
+th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,0.1);}
+th{background:#11141f;color:#00ff7f;text-align:left;}
 </style>
 </head>
 <body>
@@ -39,12 +43,32 @@ button:disabled{background:#ff4c4c;color:#fff;cursor:not-allowed;}
 
 <!-- Navigation -->
 <div class="btn-group">
+  <button class="nav-btn" data-page="accountsPage">Accounts</button>
   <button class="nav-btn" data-page="autoAddPage">Auto Add</button>
   <button class="nav-btn" data-page="historyPage">History</button>
 </div>
 
+<!-- Accounts Table -->
+<section id="accountsPage" class="page">
+  <div class="card-title">Accounts Status</div>
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Phone</th>
+          <th>Status</th>
+          <th>FloodWait</th>
+          <th>Last Checked</th>
+        </tr>
+      </thead>
+      <tbody id="accountsTable"></tbody>
+    </table>
+  </div>
+</section>
+
 <!-- Auto Add -->
-<section id="autoAddPage" class="page active">
+<section id="autoAddPage" class="page">
   <div class="card-title">Auto Add Members</div>
   <input id="sourceGroupInput" placeholder="Source Group Link"/>
   <input id="targetGroupInput" placeholder="Target Group (My Group)"/>
@@ -74,12 +98,36 @@ document.querySelectorAll(".nav-btn").forEach(btn=>{
   }
 });
 
-// ===== Console Log Auto Scroll =====
+// ===== Console Log =====
 const autoAddConsole = document.getElementById("autoAddConsole");
 function logConsole(msg){
   autoAddConsole.innerHTML += msg + "<br>";
   autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
+
+// ===== Accounts Table =====
+const accountsTable = document.getElementById("accountsTable");
+async function fetchAccounts(){
+  const res = await fetch("/account-status");
+  const data = await res.json();
+  accountsTable.innerHTML="";
+  const now = Date.now();
+  Object.keys(data).forEach(id=>{
+    const a = data[id];
+    let floodText="-", countdownClass="green";
+    if(a.floodWaitUntil && a.floodWaitUntil>now){
+      const remain = Math.floor((a.floodWaitUntil-now)/1000);
+      floodText = `${remain}s remaining | Ready: ${new Date(a.floodWaitUntil).toLocaleString()}`;
+      countdownClass="red";
+    }
+    const lastChecked = new Date(a.lastChecked||now).toLocaleString();
+    const tr = document.createElement("tr");
+    tr.innerHTML=`<td>${id}</td><td>${a.phone}</td><td>${a.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
+    accountsTable.appendChild(tr);
+  });
+}
+setInterval(fetchAccounts,1000);
+fetchAccounts();
 
 // ===== Auto Add Loop =====
 const startAutoAddBtn = document.getElementById("startAutoAddBtn");
@@ -98,25 +146,20 @@ startAutoAddBtn.onclick = async () => {
   startAutoAddBtn.disabled = true;
   autoAddStatus.innerText="Starting Auto Add...";
   autoAddConsole.innerHTML="";
-
   let offset=0, processed=0;
 
   while(true){
-    // Export 1 member from Source
     const res = await fetch("/export-single-member",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({group:source, offset})
     });
     const data = await res.json();
-    if(data.done){ break; }
+    if(data.done) break;
     offset++;
-
     if(data.skipped) continue;
-
     const member = data.user;
 
-    // Check target
     const checkRes = await fetch("/check-member",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -129,7 +172,6 @@ startAutoAddBtn.onclick = async () => {
       continue;
     }
 
-    // Add member
     const addRes = await fetch("/add-member",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -142,11 +184,11 @@ startAutoAddBtn.onclick = async () => {
     autoAddList.appendChild(li);
 
     processed++; autoAddCounter.innerText=`${processed} / ?`;
-    autoAddProgress.style.width = `${processed*2}%`; // rough progress
+    autoAddProgress.style.width = `${processed*2}%`;
 
     if(result.status==="success"){
       autoAddStatus.innerText=`Waiting 20s after success...`;
-      await new Promise(r=>setTimeout(r,20000)); // 20s delay
+      await new Promise(r=>setTimeout(r,20000));
     }
   }
 
@@ -162,7 +204,7 @@ async function fetchHistory(){
   historyList.innerHTML="";
   Object.values(data).forEach(h=>{
     const color = h.status==="success"?"success":h.status==="failed"?"failed":"skipped";
-    const timeStr = new Date(h.timestamp).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+    const timeStr = new Date(h.timestamp).toLocaleTimeString();
     historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status}<br><span style="font-size:12px;">Reason: ${h.reason||'N/A'} | ${timeStr}</span></li>`;
   });
 }
