@@ -297,54 +297,66 @@ startAutoAddBtn.onclick=async()=>{
 };
 
 // ===== History =====
-const historyTable=document.getElementById("historyTable");
-const floodTimers={};
-async function fetchHistory(){
-  const res=await fetch("/history"); const data=await res.json();
-  historyTable.innerHTML="";
-  Object.values(data).forEach((h,index)=>{
-    let category="success";
+// ===== History =====
+const historyTable = document.getElementById("historyTable");
+const historyFloodTimers = {}; // store remaining seconds per row
+
+async function fetchHistory() {
+  const res = await fetch("/history");
+  const data = await res.json();
+  historyTable.innerHTML = "";
+  const now = Date.now();
+
+  Object.values(data).forEach((h, index) => {
+    let category = "success";
     if(h.status==="failed"){
       if(h.reason && h.reason.toLowerCase().includes("flood")) category="flood"; else category="failed";
     }
     if(h.status==="skipped") category="skipped";
 
-    let label=category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="flood"?"FLOOD":"SKIPPED";
-    let colorClass=category==="success"?"success":category==="failed"?"failed":category==="flood"?"floodwait":"skipped";
+    let label = category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="flood"?"FLOOD":"SKIPPED";
+    let colorClass = category==="success"?"success":category==="failed"?"failed":category==="flood"?"floodwait":"skipped";
 
-    let reasonText=h.reason||"";
-    let floodSec=0;
+    const d = new Date(h.timestamp);
+    const date = d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
+    const time = d.toLocaleTimeString('en-US',{ timeZone:'Asia/Phnom_Penh', hour12:true });
+    const groupName = h.targetGroup || 'N/A';
 
-    const floodMatch = reasonText.match(/(\d+)\s*seconds/i);
-    if(floodMatch){
-      floodSec=Number(floodMatch[1]);
-      reasonText=`<span class="flood-countdown">${secondsToHHMMSS(floodSec)}</span>`;
-    }
+    // FloodWait seconds
+    let floodSec = 0;
+    const floodMatch = h.reason ? h.reason.match(/(\d+)\s*seconds/i) : null;
+    if(floodMatch) floodSec = Number(floodMatch[1]);
 
-    const d=new Date(h.timestamp);
-    const date=d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
-    const time=d.toLocaleTimeString('en-US',{ timeZone:'Asia/Phnom_Penh', hour12:true });
-    const groupName=h.targetGroup||'N/A';
+    const rowId = `histRow${index}`;
+    const tr = document.createElement("tr");
+    tr.id = rowId;
 
-    const rowId=`histRow${index}`;
-    const tr=document.createElement("tr");
-    tr.id=rowId;
-    tr.innerHTML=`<td>${h.username||h.user_id}</td>
-                  <td class="${colorClass}"><b>${label}</b></td>
-                  <td>${h.accountUsed||'N/A'}</td>
-                  <td>${reasonText}</td>
-                  <td>${groupName}</td>
-                  <td>${date}</td>
-                  <td>${time}</td>`;
+    tr.innerHTML = `<td>${h.username||h.user_id}</td>
+                    <td class="${colorClass}"><b>${label}</b></td>
+                    <td>${h.accountUsed||'N/A'}</td>
+                    <td class="${floodSec>0?'flood-countdown':''}">${floodSec>0?secondsToHHMMSS(floodSec):h.reason||''}</td>
+                    <td>${groupName}</td>
+                    <td>${date}</td>
+                    <td>${time}</td>`;
     historyTable.appendChild(tr);
 
-    if(floodSec>0) floodTimers[rowId]=floodSec;
+    if(floodSec>0) historyFloodTimers[rowId] = floodSec;
   });
 }
 
-// Update FloodWait timers every second
-setInterval(()=>{Object.keys(floodTimers).forEach(rowId=>{if(floodTimers[rowId]>0){floodTimers[rowId]--; const span=document.querySelector(`#${rowId} .flood-countdown`); if(span) span.innerText=secondsToHHMMSS(floodTimers[rowId]);}});},1000);
-setInterval(fetchHistory,5000); fetchHistory();
+// Update FloodWait countdown every second
+setInterval(() => {
+  Object.keys(historyFloodTimers).forEach(rowId => {
+    if(historyFloodTimers[rowId] > 0){
+      historyFloodTimers[rowId]--;
+      const td = document.querySelector(`#${rowId} .flood-countdown`);
+      if(td) td.innerText = secondsToHHMMSS(historyFloodTimers[rowId]);
+    }
+  });
+}, 1000);
+
+setInterval(fetchHistory, 5000); // refresh history every 5s
+fetchHistory();
 
 // ===== Download History =====
 document.getElementById("downloadHistoryBtn").onclick=()=>{
