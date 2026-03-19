@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Telegram Auto-Add Smart System 🚀</title>
+<title>Telegram Auto-Add PRO MAX 🚀</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>
@@ -15,6 +15,7 @@ input, select{width:100%;padding:12px;margin-top:10px;border-radius:12px;border:
 input:focus, select:focus{border:1px solid #00ff7f;}
 button{border:none;padding:12px;border-radius:12px;cursor:pointer;font-size:15px;font-weight:600;background:#00ff7f;color:#0f0f10;transition:0.2s;}
 button:hover{background:#00cc66;color:#fff;}
+button:disabled{background:#ff4c4c;color:#fff;cursor:not-allowed;}
 .btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;}
 .btn-group button{flex:1;background:#11141f;color:#fff;}
 .btn-group button:hover{background:#00ff7f;color:#0f0f10;}
@@ -42,6 +43,7 @@ th{background:#11141f;color:#00ff7f;}
 .yellow{color:#ffcc00;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
+#floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
 </style>
 </head>
 <body>
@@ -75,10 +77,11 @@ th{background:#11141f;color:#00ff7f;}
 <div class="card-title">Auto Add Members</div>
 <label for="accountSelect">Select Account (optional):</label>
 <select id="accountSelect"></select>
-<input id="sourceGroupInput" placeholder="Source Group">
-<input id="targetGroupInput" placeholder="Target Group">
+<div id="floodAlert">FloodWait Active 🚫</div>
+<input id="sourceGroupInput" placeholder="Source Group (Link)"/>
+<input id="targetGroupInput" placeholder="Target Group (My Group)"/>
 <button id="startAutoAddBtn">Start Auto-Add</button>
-<div id="loading" class="spinner">⏳ Loading Members...</div>
+<div id="loading" class="spinner">⏳ Processing...</div>
 <div id="autoAddStatus"></div>
 <div id="autoAddCounter">0 / 0</div>
 <div class="progress-bar"><div id="autoAddProgress" class="progress"></div></div>
@@ -109,15 +112,12 @@ th{background:#11141f;color:#00ff7f;}
 </div>
 
 <script>
-// Navigation
+// ===== Navigation =====
 document.querySelectorAll(".nav-btn").forEach(btn=>{
-  btn.onclick=()=>{
-    document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-    document.getElementById(btn.dataset.page).classList.add("active");
-  }
+  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active")); document.getElementById(btn.dataset.page).classList.add("active");}
 });
 
-// Accounts Table
+// ===== Accounts Table =====
 const accountsTable=document.getElementById("accountsTable");
 async function fetchAccounts(){
   try{
@@ -126,156 +126,197 @@ async function fetchAccounts(){
     const now=Date.now();
     accountsTable.innerHTML="";
     Object.keys(data).forEach(id=>{
-      const acc=data[id]; 
+      const acc=data[id];
       let floodText="-", countdownClass="green";
-      if(acc.floodWaitUntil){
-        const remainingSec=Math.floor((acc.floodWaitUntil-now)/1000);
-        if(remainingSec>0){
-          const h=Math.floor(remainingSec/3600).toString().padStart(2,"0");
-          const m=Math.floor((remainingSec%3600)/60).toString().padStart(2,"0");
-          const s=(remainingSec%60).toString().padStart(2,"0");
-          floodText=`${acc.readyTime} (${h}:${m}:${s})`;
-          countdownClass = remainingSec<60 ? "red" : remainingSec<300 ? "yellow" : "green";
-        }
+      if(acc.floodWaitUntil && acc.floodWaitUntil>now){
+        const remain=Math.floor((acc.floodWaitUntil-now)/1000);
+        const readyTime = new Date(acc.floodWaitUntil).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+        floodText=`${remain}s remaining | Ready: ${readyTime}`;
+        countdownClass="red";
       }
+      const lastChecked = new Date(acc.lastChecked||now).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${new Date(acc.lastChecked||now).toLocaleString()}</td>`;
+      tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
       accountsTable.appendChild(tr);
     });
   }catch(e){console.log(e);}
 }
 setInterval(fetchAccounts,1000); fetchAccounts();
 
-// Accounts dropdown
+// ===== Accounts dropdown =====
 const accountSelect=document.getElementById("accountSelect");
+const startAutoAddBtn=document.getElementById("startAutoAddBtn");
+const floodAlert=document.getElementById("floodAlert");
 async function loadAccountsDropdown(){
   try{
-    const res=await fetch("/account-status"); if(!res.ok) return; const data=await res.json();
+    const res=await fetch("/account-status"); if(!res.ok) return;
+    const data=await res.json();
     accountSelect.innerHTML="";
+    let anyFlood=false;
+    const now=Date.now();
     Object.keys(data).forEach(id=>{
       const acc=data[id];
       const option=document.createElement("option");
       option.value=id;
       option.text=`${acc.phone} (${acc.status})`;
-      if(acc.floodWaitUntil && acc.floodWaitUntil>Date.now()) option.disabled=true;
+      if(acc.floodWaitUntil && acc.floodWaitUntil>now){
+        option.disabled=true;
+        anyFlood=true;
+        const remain = Math.floor((acc.floodWaitUntil-now)/1000);
+        const readyTime = new Date(acc.floodWaitUntil).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+        option.text += ` [${remain}s | Ready ${readyTime}]`;
+        option.title = `FloodWait ${remain}s\nReady: ${readyTime}`;
+      }
       accountSelect.appendChild(option);
     });
+    startAutoAddBtn.disabled = anyFlood;
+    floodAlert.style.display = anyFlood ? "block" : "none";
   }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,5000); loadAccountsDropdown();
+setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
 
-// Smart Auto Add Members
+// ===== Console Log Auto Scroll =====
+function logConsole(msg){
+  autoAddConsole.innerHTML += msg + "<br>";
+  autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
+}
+
+// ===== Auto Export + Auto Join + Add Members =====
 const autoAddList=document.getElementById("autoAddList"),
       counter=document.getElementById("autoAddCounter"),
       progress=document.getElementById("autoAddProgress"),
       autoAddStatus=document.getElementById("autoAddStatus"),
       loading=document.getElementById("loading"),
-      autoAddConsole=document.getElementById("autoAddConsole");
+      autoAddConsole=document.getElementById("autoAddConsole"),
+      sourceGroupInput=document.getElementById("sourceGroupInput"),
+      targetGroupInput=document.getElementById("targetGroupInput");
 
-let addedMembers = new Set();
+startAutoAddBtn.onclick=async()=>{
+  const source=sourceGroupInput.value.trim(),
+        target=targetGroupInput.value.trim();
+  if(!source||!target) return alert("Enter groups");
 
-startAutoAddBtn.onclick = async () => {
-  const source = sourceGroupInput.value.trim();
-  const target = targetGroupInput.value.trim();
-  if(!source || !target) return alert("Enter groups");
+  loading.style.display="block";
+  autoAddStatus.innerText="Auto Join Source Group...";
+  autoAddConsole.innerHTML="";
 
-  loading.style.display = "block";
-  autoAddStatus.innerText = "Fetching members...";
-  autoAddConsole.innerHTML = "";
-
-  const res = await fetch("/members",{
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({group:source})
+  // 1️⃣ Auto Join Source (by link)
+  await fetch("/join-by-link",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({link:source})
   });
-  const members = await res.json();
-  loading.style.display = "none";
-  if(members.error) { alert(members.error); return; }
 
-  const accRes = await fetch("/account-status");
-  let accData = await accRes.json();
-  let accountsList = Object.keys(accData), accIndex=0, processed=0;
+  // 2️⃣ Export Source Members
+  autoAddStatus.innerText="Exporting Source Members...";
+  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
+  const sourceMembers=await res.json();
+  if(sourceMembers.error){ alert(sourceMembers.error); return; }
+
+  // 3️⃣ Export Target Members
+  autoAddStatus.innerText="Checking Target Members...";
+  const targetRes=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:target})});
+  const targetMembers=await targetRes.json();
+
+  loading.style.display="none";
+
+  const targetSet=new Set(targetMembers.map(u=>u.username||u.user_id));
+
+  const accRes=await fetch("/account-status"); const accData=await accRes.json();
+  let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
 
   autoAddList.innerHTML="";
-  counter.innerText=`0 / ${members.length}`;
+  counter.innerText=`0 / ${sourceMembers.length}`;
   progress.style.width=`0%`;
 
   function getNextAvailableAccount(startIndex){
-    const now = Date.now();
+    const now=Date.now();
     for(let i=0;i<accountsList.length;i++){
       let idx=(startIndex+i)%accountsList.length;
-      const acc = accData[accountsList[idx]];
-      if(!acc.floodWaitUntil || acc.floodWaitUntil <= now) return idx;
+      const acc=accData[accountsList[idx]];
+      if(acc.status==="active" && (!acc.floodWaitUntil || acc.floodWaitUntil<=now)) return idx;
     }
     return -1;
   }
 
-  for(const m of members){
-    const memberKey = m.username || m.user_id;
-    if(addedMembers.has(memberKey)){
-      // skip already added
-      const li = document.createElement("li");
-      li.innerHTML = `<img class="avatar" src="${m.avatar}"> ${memberKey} → <span class="skipped">already added</span>`;
+  for(const m of sourceMembers){
+    const nowTime=new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+    const key = m.username||m.user_id;
+
+    // ✅ Skip duplicates
+    if(targetSet.has(key)){
+      logConsole(`[SKIP ${nowTime}] ${key} already in TARGET`);
+      const li=document.createElement("li");
+      li.innerHTML=`${key} → <span class="skipped">skipped</span> (duplicate)`;
       autoAddList.appendChild(li);
-      autoAddList.scrollTop = autoAddList.scrollHeight;
-      processed++; counter.innerText=`${processed} / ${members.length}`;
-      progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+      processed++;
+      counter.innerText=`${processed} / ${sourceMembers.length}`;
+      progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
       continue;
     }
 
-    let nextAccIdx = getNextAvailableAccount(accIndex);
+    // Get next account
+    let nextAccIdx=getNextAvailableAccount(accIndex);
     if(nextAccIdx===-1){
-      autoAddStatus.innerText="All accounts FloodWait. Waiting...";
+      autoAddStatus.innerText="All accounts FloodWait... waiting";
       await new Promise(r=>setTimeout(r,5000));
-      nextAccIdx = getNextAvailableAccount(accIndex);
-      if(nextAccIdx===-1) break;
+      continue;
     }
-    accIndex = nextAccIdx;
-    const currentAccount = accountsList[accIndex];
+    accIndex=nextAccIdx;
+    const currentAccount=accountsList[accIndex];
 
-    autoAddConsole.innerHTML+=`[INFO] Using account: ${currentAccount} for ${memberKey}<br>`;
-    autoAddConsole.scrollTop=autoAddConsole.scrollHeight;
+    logConsole(`[ADD ${nowTime}] ${key} using ${currentAccount}`);
 
-    const addRes = await fetch("/add-member",{
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({username:m.username,user_id:m.user_id,targetGroup:target,accountId:currentAccount})
+    // Add Member
+    const addRes=await fetch("/add-member",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})
     });
-    const result = await addRes.json();
+    const result=await addRes.json();
 
     const li=document.createElement("li");
-    li.innerHTML=`<img class="avatar" src="${m.avatar}"> ${memberKey} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed}<br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
-    autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
+    li.innerHTML=`${key} → <span class="${result.status==='success'?'success':'failed'}">${result.status}</span>`;
+    autoAddList.appendChild(li);
 
-    if(result.status === "success"){
-      addedMembers.add(memberKey);
-      alert(`✅ New member added: ${memberKey}`);
-      let delay = 20000 + Math.floor(Math.random()*5000);
-      autoAddStatus.innerText = `Waiting ${Math.floor(delay/1000)}s...`;
+    // Add to targetSet if success
+    if(result.status==="success") targetSet.add(key);
+
+    processed++;
+    counter.innerText=`${processed} / ${sourceMembers.length}`;
+    progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
+
+    // Delay only on success
+    if(result.status==="success"){
+      const delay=30000+Math.random()*10000;
+      let sec=Math.floor(delay/1000);
+      const interval=setInterval(()=>{
+        autoAddStatus.innerText=`Waiting ${sec--}s...`;
+        if(sec<=0) clearInterval(interval);
+      },1000);
       await new Promise(r=>setTimeout(r,delay));
     }
 
-    if(result.status === "success" || (result.reason && result.reason.includes("FloodWait"))){
-      accIndex = (accIndex+1)%accountsList.length;
-    }
-
-    processed++;
-    counter.innerText=`${processed} / ${members.length}`;
-    progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+    accIndex=(accIndex+1)%accountsList.length;
   }
 
-  autoAddStatus.innerText="Auto Add Finished! ✅";
-  alert("Auto Add Finished");
+  autoAddStatus.innerText="DONE ✅ Auto Export + Add Finished";
+  alert("Done 🚀");
 };
 
-// History
+// ===== History =====
 const historyList=document.getElementById("historyList");
 async function fetchHistory(){
   const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
   Object.values(data).forEach(h=>{
     const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
-    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'}</span></li>`;
+    const timeStr=new Date(h.timestamp).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'} | ${timeStr}</span></li>`;
   });
 }
 setInterval(fetchHistory,6000); fetchHistory();
+
+const downloadHistoryBtn=document.getElementById("downloadHistoryBtn");
 downloadHistoryBtn.onclick=async()=>{
   const res=await fetch("/history"); const data=await res.json();
   const blob=new Blob([JSON.stringify(data,null,2)]); const a=document.createElement("a");
