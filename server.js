@@ -24,58 +24,42 @@ const db = getDatabase()
 // ===== Accounts =====
 const accounts = []
 const clients = {}
-
 let i=1
 while(process.env[`TG_ACCOUNT_${i}_PHONE`]){
   const api_id=Number(process.env[`TG_ACCOUNT_${i}_API_ID`])
   const api_hash=process.env[`TG_ACCOUNT_${i}_API_HASH`]
   const session=process.env[`TG_ACCOUNT_${i}_SESSION`]
   const phone=process.env[`TG_ACCOUNT_${i}_PHONE`]
-
   if(!api_id||!api_hash||!session){i++; continue}
-
-  accounts.push({
-    phone, api_id, api_hash, session,
-    id:`TG_ACCOUNT_${i}`,
-    status:"pending",
-    floodWaitUntil:null
-  })
+  accounts.push({phone, api_id, api_hash, session, id:`TG_ACCOUNT_${i}`, status:"pending", floodWaitUntil:null})
   i++
 }
 
 // ===== Client =====
 async function getClient(account){
   if(clients[account.id]) return clients[account.id]
-  const client=new TelegramClient(
-    new StringSession(account.session),
-    account.api_id,
-    account.api_hash,
-    {connectionRetries:5}
-  )
+  const client = new TelegramClient(new StringSession(account.session), account.api_id, account.api_hash, {connectionRetries:5})
   await client.connect()
   clients[account.id]=client
   return client
 }
 
-// ===== Flood Parse =====
+// ===== Flood Parser =====
 function parseFlood(err){
-  const msg=err.message||""
-  const m1=msg.match(/FLOOD_WAIT_(\d+)/)
-  const m2=msg.match(/wait of (\d+) seconds/i)
+  const msg = err.message || ""
+  const m1 = msg.match(/FLOOD_WAIT_(\d+)/)
+  const m2 = msg.match(/wait of (\d+) seconds/i)
   if(m1) return Number(m1[1])
   if(m2) return Number(m2[1])
   return null
 }
 
-// ===== Auto Clear FloodWait =====
+// ===== Refresh Account =====
 async function refreshAccountStatus(account){
-  if(account.floodWaitUntil && account.floodWaitUntil < Date.now()){
-    account.floodWaitUntil = null
-    account.status = "active"
-    await update(ref(db, `accounts/${account.id}`), {
-      status: "active",
-      floodWaitUntil: null
-    })
+  if(account.floodWaitUntil && account.floodWaitUntil<Date.now()){
+    account.floodWaitUntil=null
+    account.status="active"
+    await update(ref(db,`accounts/${account.id}`),{status:"active",floodWaitUntil:null})
   }
 }
 
@@ -83,38 +67,21 @@ async function refreshAccountStatus(account){
 async function checkTGAccount(account){
   try{
     await refreshAccountStatus(account)
-    const client=await getClient(account)
+    const client = await getClient(account)
     await client.getMe()
-
     account.status="active"
     account.floodWaitUntil=null
-
-    await update(ref(db,`accounts/${account.id}`),{
-      status:"active",
-      phone:account.phone,
-      lastChecked:Date.now(),
-      floodWaitUntil:null
-    })
-
+    await update(ref(db,`accounts/${account.id}`),{status:"active",phone:account.phone,lastChecked:Date.now(),floodWaitUntil:null})
   }catch(err){
     const wait=parseFlood(err)
-
     let status="error", floodUntil=null
-
     if(wait){
       status="floodwait"
       floodUntil=Date.now()+wait*1000
       account.floodWaitUntil=floodUntil
       account.status="floodwait"
     }
-
-    await update(ref(db,`accounts/${account.id}`),{
-      status,
-      floodWaitUntil:floodUntil,
-      error:err.message,
-      phone:account.phone,
-      lastChecked:Date.now()
-    })
+    await update(ref(db,`accounts/${account.id}`),{status,floodWaitUntil:floodUntil,error:err.message,phone:account.phone,lastChecked:Date.now()})
   }
 }
 
@@ -130,42 +97,35 @@ setInterval(autoCheck,60000)
 autoCheck()
 
 // ===== Get Available Account with retry =====
-async function getAvailableAccountRetry(retries=3, delayMs=5000){
-  for(let i=0;i<retries;i++){
+async function getAvailableAccountRetry(retry=3, delayMs=3000){
+  for(let i=0;i<retry;i++){
     const now = Date.now()
-    for(const acc of accounts){
-      if(acc.floodWaitUntil && acc.floodWaitUntil < now){
-        acc.floodWaitUntil = null
-        acc.status = "active"
-      }
-    }
-    const available = accounts.find(a => !a.floodWaitUntil)
-    if(available) return available
+    const acc = accounts.find(a=>!a.floodWaitUntil || a.floodWaitUntil<=now)
+    if(acc) return acc
     await sleep(delayMs)
   }
   return null
 }
 
-// ===== Members Export (Fast) =====
+// ===== Members =====
 app.post('/members',async(req,res)=>{
   try{
     const {group}=req.body
     const acc = await getAvailableAccountRetry()
     if(!acc) return res.json({error:"No active account"})
-
     const client = await getClient(acc)
     const entity = await client.getEntity(group)
 
-    let offset=0, BATCH=500, all=[]
+    let offset=0, limit=500, all=[]
     while(true){
-      const batch = await client.getParticipants(entity,{limit:BATCH, offset})
-      if(!batch.length) break
-      all.push(...batch.filter(p=>!p.bot))
-      offset += batch.length
-      await sleep(500) // tiny pause to reduce rate-limit
+      const participants = await client.getParticipants(entity,{limit,offset})
+      if(!participants.length) break
+      all = all.concat(participants)
+      offset += participants.length
+      await sleep(500)
     }
 
-    const members = all.map(p=>({
+    const members = all.filter(p=>!p.bot).map(p=>({
       user_id:p.id,
       username:p.username,
       access_hash:p.access_hash,
@@ -173,136 +133,146 @@ app.post('/members',async(req,res)=>{
     }))
 
     res.json(members)
-  }catch(err){
-    res.json({error:err.message})
-  }
+  }catch(err){ res.json({error:err.message}) }
 })
 
 // ===== Add Member =====
 app.post('/add-member',async(req,res)=>{
   try{
-    const {username,user_id,access_hash,targetGroup}=req.body
+    const {username,user_id,access_hash,targetGroup} = req.body
+    const acc = await getAvailableAccountRetry()
+    if(!acc) return res.json({status:"failed",reason:"All accounts FloodWait",accountUsed:"none"})
+    if(!username && (!user_id || !access_hash)) return res.json({status:"skipped",reason:"missing username/access_hash",accountUsed:"none",silent:true})
 
-    const clientAcc = await getAvailableAccountRetry(5,5000)
-    if(!clientAcc){
-      return res.json({
-        status:"failed",
-        reason:"All accounts FloodWait",
-        accountUsed:"none"
-      })
-    }
-
-    if(!username && (!user_id || !access_hash)){
-      return res.json({
-        status:"skipped",
-        reason:"missing username/access_hash",
-        accountUsed:"none",
-        silent:true
-      })
-    }
-
-    const client = await getClient(clientAcc)
+    const client = await getClient(acc)
     const group = await client.getEntity(targetGroup)
 
-    // ===== Local History Map =====
+    // Check history
     const histSnap = await get(ref(db,'history'))
     const histList = Object.values(histSnap.val()||{})
-    const histMap = new Map()
-    histList.forEach(h=>{
-      const key = h.username||h.user_id
-      histMap.set(key,h.status)
-    })
+    const alreadyHistory = histList.some(h=>(h.username===username || h.user_id===user_id) && h.status==="success")
 
-    const key = username||user_id
-    if(histMap.get(key)==="success"){
-      return res.json({
-        status:"skipped",
-        reason:"already in history",
-        accountUsed:"none",
-        silent:true
-      })
-    }
-
-    // ===== Check target group =====
-    let alreadyInGroup = false
+    // Check target group
+    let alreadyInGroup=false
     try{
-      let userEntity
-      if(username) userEntity = await client.getEntity(username)
-      else userEntity = new Api.InputUser({ userId:user_id, accessHash:BigInt(access_hash) })
+      const userEntity = username ? await client.getEntity(username) : new Api.InputUser({userId:user_id,accessHash:BigInt(access_hash)})
       await client.getParticipant(group,userEntity)
-      alreadyInGroup = true
-    }catch(e){alreadyInGroup=false}
+      alreadyInGroup=true
+    }catch(e){ alreadyInGroup=false }
 
-    if(alreadyInGroup){
-      return res.json({
-        status:"skipped",
-        reason:"already in target group",
-        accountUsed:"none",
-        silent:true
-      })
-    }
+    if(alreadyHistory || alreadyInGroup) return res.json({status:"skipped",reason:"already in history or target group",accountUsed:"none",silent:true})
 
-    // ===== Add member =====
     let status="failed", reason="unknown"
     try{
-      let userEntity
-      if(username) userEntity = await client.getEntity(username)
-      else userEntity = new Api.InputUser({ userId:user_id, accessHash:BigInt(access_hash) })
-
-      await client.invoke(new Api.channels.InviteToChannel({
-        channel:group,
-        users:[userEntity]
-      }))
-
-      status="success"
-      reason="joined"
-
-      // Random delay 10–15s per add
-      const delay=10000+Math.random()*5000
-      await sleep(delay)
-
+      const userEntity = username ? await client.getEntity(username) : new Api.InputUser({userId:user_id,accessHash:BigInt(access_hash)})
+      await client.invoke(new Api.channels.InviteToChannel({channel:group,users:[userEntity]}))
+      status="success"; reason="joined"
+      await sleep(10000+Math.random()*5000)
     }catch(err){
       const wait=parseFlood(err)
       if(wait){
         const until=Date.now()+wait*1000
-        clientAcc.floodWaitUntil=until
-        clientAcc.status="floodwait"
-
-        await update(ref(db,`accounts/${clientAcc.id}`),{
-          status:"floodwait",
-          floodWaitUntil:until
-        })
-
-        const ready=new Date(until).toLocaleString()
-        reason=`FloodWait ${wait}s | Ready ${ready}`
-      }else{
-        reason=err.message
-      }
+        acc.floodWaitUntil=until
+        acc.status="floodwait"
+        await update(ref(db,`accounts/${acc.id}`),{status:"floodwait",floodWaitUntil:until})
+        reason=`FloodWait ${wait}s`
+      }else reason=err.message
     }
 
     await push(ref(db,'history'),{
-      username,user_id,status,reason,
-      accountUsed:clientAcc.id,
-      timestamp:Date.now()
+      username,user_id,status,reason,accountUsed:acc.id,timestamp:Date.now()
     })
 
-    res.json({status,reason,accountUsed:clientAcc.id})
-
+    res.json({status,reason,accountUsed:acc.id})
   }catch(err){
-    res.json({
-      status:"failed",
-      reason:err.message,
-      accountUsed:"unknown"
-    })
+    res.json({status:"failed",reason:err.message,accountUsed:"unknown"})
   }
 })
 
+// ===== Auto Add Members (Export → Check → Add) =====
+app.post('/auto-add', async (req,res)=>{
+  try{
+    const {sourceGroup, targetGroup} = req.body
+    if(!sourceGroup || !targetGroup) return res.json({error:"Provide source and target group"})
+
+    // 1️⃣ Export source members
+    const accExport = await getAvailableAccountRetry()
+    if(!accExport) return res.json({error:"No active account to export"})
+    const clientExport = await getClient(accExport)
+    const entitySource = await clientExport.getEntity(sourceGroup)
+
+    let allMembers=[], offset=0, BATCH=500
+    while(true){
+      const batch = await clientExport.getParticipants(entitySource,{limit:BATCH, offset})
+      if(!batch.length) break
+      allMembers.push(...batch.filter(p=>!p.bot))
+      offset += batch.length
+      await sleep(500)
+    }
+
+    // 2️⃣ Export target members
+    const accTarget = await getAvailableAccountRetry()
+    if(!accTarget) return res.json({error:"No active account for target"})
+    const clientTarget = await getClient(accTarget)
+    const entityTarget = await clientTarget.getEntity(targetGroup)
+    const targetParticipants = await clientTarget.getParticipants(entityTarget,{limit:2000})
+    const targetSet = new Set(targetParticipants.map(u=>u.username||u.id))
+
+    // 3️⃣ Local history map
+    const histSnap = await get(ref(db,'history'))
+    const histList = Object.values(histSnap.val()||{})
+    const histMap = new Map()
+    histList.forEach(h=>histMap.set(h.username||h.user_id,h.status))
+
+    // 4️⃣ Add members one by one
+    const results = []
+    for(const m of allMembers){
+      const key = m.username || m.id
+      if(targetSet.has(key) || histMap.get(key)==="success"){
+        results.push({key,status:"skipped"})
+        continue
+      }
+
+      // Pick next available account
+      const acc = await getAvailableAccountRetry(5,5000)
+      if(!acc) { results.push({key,status:"failed",reason:"All accounts FloodWait"}); continue }
+      const client = await getClient(acc)
+
+      try{
+        const userEntity = m.username ? await client.getEntity(m.username) : new Api.InputUser({userId:m.id, accessHash:BigInt(m.access_hash)})
+        await client.invoke(new Api.channels.InviteToChannel({channel:entityTarget,users:[userEntity]}))
+        await push(ref(db,'history'),{
+          username:m.username, user_id:m.id, status:"success", reason:"joined", accountUsed:acc.id, timestamp:Date.now()
+        })
+        targetSet.add(key)
+        results.push({key,status:"success"})
+        await sleep(10000+Math.random()*5000)
+      }catch(err){
+        const wait=parseFlood(err)
+        let reason=err.message
+        if(wait){
+          const until = Date.now()+wait*1000
+          acc.floodWaitUntil=until
+          acc.status="floodwait"
+          await update(ref(db,`accounts/${acc.id}`),{status:"floodwait",floodWaitUntil:until})
+          reason=`FloodWait ${wait}s`
+        }
+        results.push({key,status:"failed",reason})
+        await push(ref(db,'history'),{
+          username:m.username,user_id:m.id,status:"failed",reason,accountUsed:acc.id,timestamp:Date.now()
+        })
+      }
+    }
+
+    res.json({total:allMembers.length, results})
+  }catch(err){ res.json({error:err.message}) }
+})
+
 // ===== Account Status =====
-app.get('/account-status',async(req,res)=>{
+app.get('/account-status', async(req,res)=>{
   const snap=await get(ref(db,'accounts'))
   const now=Date.now()
   const data=snap.val()||{}
-
   for(const id in data){
     const a=data[id]
     if(a.floodWaitUntil){
@@ -310,10 +280,7 @@ app.get('/account-status',async(req,res)=>{
       if(remain<=0){
         a.status="active"
         a.floodWaitUntil=null
-        await update(ref(db,`accounts/${id}`),{
-          status:"active",
-          floodWaitUntil:null
-        })
+        await update(ref(db,`accounts/${id}`),{status:"active",floodWaitUntil:null})
       }else{
         a.readyTime=new Date(a.floodWaitUntil).toLocaleString()
         a.remaining=remain
@@ -324,10 +291,7 @@ app.get('/account-status',async(req,res)=>{
 })
 
 // ===== History =====
-app.get('/history',async(req,res)=>{
-  const snap=await get(ref(db,'history'))
-  res.json(snap.val()||{})
-})
+app.get('/history',async(req,res)=>{const snap=await get(ref(db,'history')); res.json(snap.val()||{})})
 
 // ===== Frontend =====
 const __filename=fileURLToPath(import.meta.url)
