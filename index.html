@@ -328,69 +328,75 @@ startAutoAddBtn.onclick = async()=>{
 };
 
 // ===== History Table =====
-const historyTable = document.getElementById("historyTable");
+// ===== History Rendering =====
+function secondsToHHMMSS(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return [h,m,s].map(v=>v.toString().padStart(2,'0')).join(':');
+}
 
-async function fetchHistory() {
+async function fetchHistory(){
   const res = await fetch("/history");
   const data = await res.json();
   historyTable.innerHTML = "";
 
   Object.values(data).forEach(h => {
-    let category = "success";
-    let reasonText = h.reason || "";
 
-    if (h.status === "failed") {
-      if (reasonText.toLowerCase().includes("flood")) {
-        category = "floodwait";
-        // ប្រើ timestamp នៃ FloodWait ពី history ឬ fallback
-        const readyTimestamp = h.floodWaitUntil || h.timestamp;
-        const readyDate = new Date(readyTimestamp).toLocaleString('en-US', {
-          timeZone: 'Asia/Phnom_Penh',
-          hour12: true,
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric'
-        });
-        reasonText = `FloodWait | Ready: ${readyDate}`;
+    // ===== Category =====
+    let category = "success";
+    if(h.status === "failed"){
+      if(h.reason && h.reason.toLowerCase().includes("flood")){
+        category = "flood";
       } else {
         category = "failed";
       }
     }
+    if(h.status === "skipped"){
+      category = "skipped";
+    }
 
-    if (h.status === "skipped") category = "skipped";
-
+    // ===== Label + Color =====
     const label =
-      category === "success" ? "SUCCESS" :
-      category === "failed" ? "ERROR" :
-      category === "floodwait" ? "FLOOD" :
+      category==="success" ? "SUCCESS" :
+      category==="failed" ? "ERROR" :
+      category==="flood" ? "FLOOD" :
       "SKIPPED";
 
     const colorClass =
-      category === "success" ? "success" :
-      category === "failed" ? "failed" :
-      category === "floodwait" ? "floodwait" :
+      category==="success" ? "success" :
+      category==="failed" ? "failed" :
+      category==="flood" ? "floodwait" :
       "skipped";
 
+    // ===== Date & Time =====
     const d = new Date(h.timestamp);
-    const date = d.toLocaleDateString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
-    const time = d.toLocaleTimeString('en-US', {
-      timeZone: 'Asia/Phnom_Penh',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true
+    const date = d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
+    const time = d.toLocaleTimeString('en-US',{
+      timeZone:'Asia/Phnom_Penh',
+      hour:'2-digit',
+      minute:'2-digit',
+      second:'2-digit',
+      hour12:true
     });
 
+    // ===== Format Reason =====
+    let reasonText = h.reason || "";
+    const floodMatch = reasonText.match(/wait of (\d+) seconds/i);
+    if(floodMatch){
+      const waitSec = Number(floodMatch[1]);
+      reasonText = `FloodWait | Time: ${secondsToHHMMSS(waitSec)}`;
+    }
+
+    // ===== Target Group =====
     const groupName = h.targetGroup || 'N/A';
 
+    // ===== Render Row =====
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${h.username || h.user_id}</td>
-      <td class="${colorClass}">${label}</td>
-      <td>${h.accountUsed}</td>
+      <td class="${colorClass}"><b>${label}</b></td>
+      <td>${h.accountUsed || 'N/A'}</td>
       <td>${reasonText}</td>
       <td>${groupName}</td>
       <td>${date}</td>
@@ -399,9 +405,6 @@ async function fetchHistory() {
     historyTable.appendChild(tr);
   });
 }
-
-// Refresh History every 2 seconds
-setInterval(fetchHistory, 2000);
 
 fetchHistory();
 </script>
