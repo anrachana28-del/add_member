@@ -9,6 +9,7 @@
 *{box-sizing:border-box;}
 body{font-family:'JetBrains Mono',monospace;background:#0f0f10;color:#fff;margin:0;padding:0;}
 .container{max-width:1000px;margin:auto;padding:15px;}
+header{font-family:'Courier New', monospace;text-align:center;white-space:pre;color:#00ff7f;margin-bottom:20px;}
 section{background:#1e1e2a;border-radius:20px;padding:20px;margin-bottom:20px;box-shadow:0 6px 20px rgba(0,0,0,0.6);}
 .card-title{font-size:24px;font-weight:700;margin-bottom:15px;color:#00ff7f;text-align:center;}
 input, select{width:100%;padding:12px;margin-top:10px;border-radius:12px;border:none;background:#11141f;color:#fff;font-size:15px;outline:none;}
@@ -44,7 +45,6 @@ th{background:#11141f;color:#00ff7f;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
 #floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
-
 td.success{color:#00ff7f;font-weight:700;}
 td.failed{color:#ff4c4c;font-weight:700;}
 td.floodwait{color:#ffcc00;font-weight:700;}
@@ -54,7 +54,15 @@ td.skipped{color:#9999ff;font-weight:700;}
 <body>
 <div class="container">
 
-<!-- Navigation -->
+<header>
+<span style="color:#00ff7f">██████╗ █████╗  ██████╗██╗  ██╗ █████╗ ███╗   ██╗ █████╗</span><br>
+<span style="color:#ffcc00">██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██╔══██╗████╗  ██║██╔══██╗</span><br>
+<span style="color:#00ccff">██████╔╝███████║██║     █████╔╝ ███████║██╔██╗ ██║███████║</span><br>
+<span style="color:#ff00ff">██╔═══╝ ██╔══██║██║     ██╔═██╗ ██╔══██║██║╚██╗██║██╔══██║</span><br>
+<span style="color:#ff5555">██║     ██║  ██║╚██████╗██║  ██╗██║  ██║██║ ╚████║██║  ██║</span><br>
+<span style="color:#00ff7f">╚═╝     ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝</span>
+</header>
+
 <div class="btn-group">
 <button class="nav-btn" data-page="accountsPage">Accounts</button>
 <button class="nav-btn" data-page="membersPage">Auto Add</button>
@@ -62,7 +70,6 @@ td.skipped{color:#9999ff;font-weight:700;}
 <button class="nav-btn" data-page="historyPage">History</button>
 </div>
 
-<!-- Accounts -->
 <section id="accountsPage" class="page active">
 <div class="card-title">Accounts Status</div>
 <div class="table-responsive">
@@ -77,7 +84,6 @@ td.skipped{color:#9999ff;font-weight:700;}
 </div>
 </section>
 
-<!-- Auto Add -->
 <section id="membersPage" class="page">
 <div class="card-title">Auto Add Members</div>
 <label for="accountSelect">Select Account (optional):</label>
@@ -94,7 +100,6 @@ td.skipped{color:#9999ff;font-weight:700;}
 <div class="console-log" id="autoAddConsole"></div>
 </section>
 
-<!-- Upload -->
 <section id="uploadPage" class="page">
 <div class="card-title">Upload Accounts</div>
 <input id="phoneInput" placeholder="Phone +855">
@@ -107,24 +112,23 @@ td.skipped{color:#9999ff;font-weight:700;}
 <div id="uploadStats"></div>
 </section>
 
-<!-- History -->
 <section id="historyPage" class="page">
 <div class="card-title">History</div>
 <div class="table-responsive">
-  <table>
-    <thead>
-      <tr>
-        <th>User</th>
-        <th>Status</th>
-        <th>Account</th>
-        <th>Reason</th>
-        <th>Group</th>
-        <th>Date</th>
-        <th>Time</th>
-      </tr>
-    </thead>
-    <tbody id="historyTable"></tbody>
-  </table>
+<table>
+<thead>
+<tr>
+<th>User</th>
+<th>Status</th>
+<th>Account</th>
+<th>Reason</th>
+<th>Group</th>
+<th>Date</th>
+<th>Time</th>
+</tr>
+</thead>
+<tbody id="historyTable"></tbody>
+</table>
 </div>
 <button id="downloadHistoryBtn">Download History</button>
 </section>
@@ -132,15 +136,10 @@ td.skipped{color:#9999ff;font-weight:700;}
 </div>
 
 <script>
-// ===== Navigation =====
 document.querySelectorAll(".nav-btn").forEach(btn=>{
-  btn.onclick=()=>{
-    document.querySelectorAll(".page").forEach(p=>p.classList.remove("active")); 
-    document.getElementById(btn.dataset.page).classList.add("active");
-  }
+  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active")); document.getElementById(btn.dataset.page).classList.add("active");}
 });
 
-// ===== Accounts Table =====
 const accountsTable=document.getElementById("accountsTable");
 async function fetchAccounts(){
   try{
@@ -172,9 +171,8 @@ function updateCountdowns(){
   });
 }
 setInterval(updateCountdowns,1000);
-setInterval(fetchAccounts,1000); fetchAccounts();
+setInterval(fetchAccounts,5000); fetchAccounts();
 
-// ===== Accounts dropdown + FloodWait =====
 const accountSelect=document.getElementById("accountSelect");
 const startAutoAddBtn=document.getElementById("startAutoAddBtn");
 const floodAlert=document.getElementById("floodAlert");
@@ -204,9 +202,17 @@ async function loadAccountsDropdown(){
     floodAlert.style.display = anyFlood ? "block" : "none";
   }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
+setInterval(loadAccountsDropdown,5000); loadAccountsDropdown();
 
-// ===== Console Log Auto Scroll =====
+const autoAddList=document.getElementById("autoAddList"),
+      counter=document.getElementById("autoAddCounter"),
+      progress=document.getElementById("autoAddProgress"),
+      autoAddStatus=document.getElementById("autoAddStatus"),
+      loading=document.getElementById("loading"),
+      autoAddConsole=document.getElementById("autoAddConsole"),
+      sourceGroupInput=document.getElementById("sourceGroupInput"),
+      targetGroupInput=document.getElementById("targetGroupInput");
+
 function logConsole(msg, type="info"){
   let color = "#fff";
   if(type==="success") color="#00ff7f";
@@ -216,55 +222,76 @@ function logConsole(msg, type="info"){
   autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
 
-// ===== History =====
+// Auto Add Members simplified version (full logic stays same as previous)
+startAutoAddBtn.onclick=async()=>{
+  const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
+  if(!source||!target) return alert("Enter groups");
+  loading.style.display="block"; autoAddStatus.innerText="Fetching members..."; autoAddConsole.innerHTML="";
+  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
+  const members=await res.json(); loading.style.display="none";
+  if(members.error){ alert(members.error); return; }
+
+  const accRes=await fetch("/account-status"); const accData=await accRes.json();
+  let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
+
+  const histRes=await fetch("/history"); const histData=await histRes.json(); const histList = Object.values(histData||{});
+
+  autoAddList.innerHTML=""; counter.innerText=`0 / ${members.length}`; progress.style.width=`0%`;
+
+  function getNextAvailableAccount(startIndex){
+    const now = Date.now(); let best = -1;
+    for(let i=0;i<accountsList.length;i++){
+      let idx = (startIndex + i) % accountsList.length;
+      const acc = accData[accountsList[idx]];
+      if(acc.status === "active"){
+        if(!acc.floodWaitUntil || acc.floodWaitUntil <= now) return idx;
+        if(best === -1 || acc.floodWaitUntil < accData[accountsList[best]].floodWaitUntil) best = idx;
+      }
+    }
+    return best;
+  }
+
+  for(const m of members){
+    const nowTime = new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+    const alreadyHistory = histList.some(h => (h.username===m.username || h.user_id===m.user_id) && h.status==="success");
+    if(alreadyHistory){ logConsole(`[SKIP ${nowTime}] ${m.username||m.user_id} already in history`); processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`; continue; }
+    let nextAccIdx=getNextAvailableAccount(accIndex);
+    if(nextAccIdx===-1){ autoAddStatus.innerText="All accounts FloodWait. Waiting..."; await new Promise(r=>setTimeout(r,10000)); continue; }
+    accIndex=nextAccIdx; const currentAccount=accountsList[accIndex];
+    logConsole(`[INFO ${nowTime}] Using account: ${currentAccount} for ${m.username||m.user_id}`);
+    const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
+    const result=await addRes.json();
+    const li=document.createElement("li");
+    li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
+    autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
+    processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+    if(result.status==="success"){ const delay = 30000 + Math.floor(Math.random()*10000); await new Promise(r=>setTimeout(r, delay)); }
+    if(result.status==="success" || (result.reason && result.reason.includes("FloodWait"))) accIndex=(accIndex+1)%accountsList.length;
+  }
+
+  autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
+};
+
 const historyTable = document.getElementById("historyTable");
 async function fetchHistory(){
-  try{
-    const res = await fetch("/history");
-    if(!res.ok) return;
-    const data = await res.json();
-    console.log("History JSON:", data); // Debug
-
-    historyTable.innerHTML = "";
-    Object.values(data).forEach(h=>{
-      const usernameOrId = h.username || h.user_id || 'N/A';
-      const status = h.status || 'N/A';
-      const reason = h.reason || 'N/A';
-      const accountUsed = h.accountUsed || 'N/A';
-      const groupName = h.targetGroup || 'N/A';
-
-      // Timestamp fix: detect seconds or milliseconds
-      let ts = h.timestamp || Date.now();
-      if(ts < 1e12) ts *= 1000;
-      const d = new Date(ts);
-      const date = d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
-      const time = d.toLocaleTimeString('en-US',{ timeZone:'Asia/Phnom_Penh',hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit' });
-
-      // Status category
-      let category = 'success';
-      if(status.toLowerCase() === 'failed'){
-        if(reason.toLowerCase().includes("flood")) category = 'flood';
-        else category = 'failed';
-      } else if(status.toLowerCase() === 'skipped') category = 'skipped';
-
-      const label = category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="flood"?"FLOOD":"SKIPPED";
-      const colorClass = category==="success"?"success":category==="failed"?"failed":category==="flood"?"floodwait":"skipped";
-
-      const tr = document.createElement("tr");
-      tr.innerHTML=`
-        <td>${usernameOrId}</td>
-        <td class="${colorClass}"><b>${label}</b></td>
-        <td>${accountUsed}</td>
-        <td>${reason}</td>
-        <td>${groupName}</td>
-        <td>${date}</td>
-        <td>${time}</td>
-      `;
-      historyTable.appendChild(tr);
-    });
-  }catch(e){console.log(e);}
+  const res = await fetch("/history"); const data = await res.json();
+  historyTable.innerHTML = "";
+  Object.values(data).forEach(h => {
+    let category = "success";
+    if(h.status === "failed"){ category = h.reason && h.reason.toLowerCase().includes("flood") ? "flood" : "failed"; }
+    if(h.status === "skipped"){ category = "skipped"; }
+    const label = category==="success" ? "SUCCESS" : category==="failed" ? "ERROR" : category==="flood" ? "FLOOD" : "SKIPPED";
+    const colorClass = category==="success" ? "success" : category==="failed" ? "failed" : category==="flood" ? "floodwait" : "skipped";
+    const d = new Date(h.timestamp);
+    const date = d.toLocaleDateString('en-GB',{ timeZone:'Asia/Phnom_Penh' });
+    const time = d.toLocaleTimeString('en-US',{ timeZone:'Asia/Phnom_Penh', hour12:true });
+    const groupName = h.targetGroup || 'N/A';
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${h.username || h.user_id}</td><td class="${colorClass}"><b>${label}</b></td><td>${h.accountUsed || 'N/A'}</td><td>${h.reason || 'N/A'}</td><td>${groupName}</td><td>${date}</td><td>${time}</td>`;
+    historyTable.appendChild(tr);
+  });
 }
-setInterval(fetchHistory,2000); fetchHistory();
+setInterval(fetchHistory,5000); fetchHistory();
 
 const downloadHistoryBtn=document.getElementById("downloadHistoryBtn");
 downloadHistoryBtn.onclick=async()=>{
