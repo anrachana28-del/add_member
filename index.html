@@ -243,11 +243,11 @@ startAutoAddBtn.onclick=async()=>{
     const nowTime=new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
     const key = m.username||m.user_id;
 
-    // ✅ Skip duplicates
+    // ✅ Skip
     if(targetSet.has(key)){
       logConsole(`[SKIP ${nowTime}] ${key} already in TARGET`);
       const li=document.createElement("li");
-      li.innerHTML=`${key} → <span class="skipped">skipped</span> (duplicate)`;
+      li.innerHTML=`${key} → <span class="skipped">skipped</span> (aready in group)`;
       autoAddList.appendChild(li);
       processed++;
       counter.innerText=`${processed} / ${sourceMembers.length}`;
