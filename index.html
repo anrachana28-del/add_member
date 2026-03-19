@@ -220,7 +220,119 @@ setInterval(()=>{
     }
   });
 },1000);
+// ===== Auto Add Members =====
+const autoAddList=document.getElementById("autoAddList"),
+      counter=document.getElementById("autoAddCounter"),
+      progress=document.getElementById("autoAddProgress"),
+      autoAddStatus=document.getElementById("autoAddStatus"),
+      loading=document.getElementById("loading"),
+      sourceGroupInput=document.getElementById("sourceGroupInput"),
+      targetGroupInput=document.getElementById("targetGroupInput");
 
+startAutoAddBtn.onclick=async()=>{
+  const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
+  if(!source||!target) return alert("Enter groups");
+
+  loading.style.display="block"; 
+  autoAddStatus.innerText="Fetching members..."; 
+  autoAddConsole.innerHTML=""; 
+  autoAddList.innerHTML="";
+  counter.innerText="0 / 0"; 
+  progress.style.width="0%";
+
+  // Fetch members from server
+  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
+  const members=await res.json(); 
+  loading.style.display="none";
+  if(members.error){ alert(members.error); return; }
+
+  const accRes=await fetch("/account-status"); 
+  const accData=await accRes.json();
+  let accountsList=Object.keys(accData); 
+  let accIndex=0; 
+  let processed=0;
+
+  const histRes=await fetch("/history"); 
+  const histData=await histRes.json(); 
+  const histList = Object.values(histData||{});
+
+  counter.innerText=`0 / ${members.length}`;
+  progress.style.width=`0%`;
+
+  function getNextAvailableAccount(startIndex){
+    const now=Date.now(); let best=-1;
+    for(let i=0;i<accountsList.length;i++){
+      let idx=(startIndex+i)%accountsList.length;
+      const acc=accData[accountsList[idx]];
+      if(acc.status==="active" && (!acc.floodWaitUntil || acc.floodWaitUntil<=now)) return idx;
+      if(best===-1 || (acc.floodWaitUntil && acc.floodWaitUntil<accData[accountsList[best]].floodWaitUntil)) best=idx;
+    }
+    return best;
+  }
+
+  for(let i=0;i<members.length;i++){
+    const m=members[i];
+    const nowTime=new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+
+    // Skip if already in history
+    const alreadyHistory = histList.some(h => (h.username===m.username || h.user_id===m.user_id) && h.status==="success");
+    if(alreadyHistory){
+      autoAddConsole.innerHTML += `<span style="color:#ffcc00">[SKIP ${nowTime}] ${m.username||m.user_id} already in history</span><br>`;
+      processed++; counter.innerText=`${processed}/${members.length}`; 
+      continue;
+    }
+
+    // Skip if already in target group
+    const checkRes = await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
+    const checkData = await checkRes.json();
+    if(checkData.status==="skipped" && checkData.reason.includes("already")){
+      autoAddConsole.innerHTML += `<span style="color:#ffcc00">[SKIP ${nowTime}] ${m.username||m.user_id} already in target group</span><br>`;
+      processed++; counter.innerText=`${processed}/${members.length}`;
+      continue;
+    }
+
+    // Get next available account
+    let nextAccIdx=getNextAvailableAccount(accIndex);
+    if(nextAccIdx===-1){
+      autoAddStatus.innerText="All accounts FloodWait. Waiting...";
+      await new Promise(r=>setTimeout(r,5000));
+      continue;
+    }
+    accIndex=nextAccIdx; 
+    const currentAccount=accountsList[accIndex];
+
+    autoAddConsole.innerHTML += `<span style="color:#00ff7f">[INFO ${nowTime}] Using account: ${currentAccount} for ${m.username||m.user_id}</span><br>`;
+
+    // Actually add member
+    let result=checkData;
+    autoAddList.innerHTML += `<li><img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed||'none'} [${nowTime}]<br>Reason: ${result.reason||'N/A'}</li>`;
+    autoAddList.scrollTop = autoAddList.scrollHeight;
+
+    processed++; counter.innerText=`${processed}/${members.length}`;
+    progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+
+    if(result.status==="success"){
+      // Random delay 30–40s
+      const delay=30000 + Math.floor(Math.random()*10000);
+      let countdown=Math.floor(delay/1000);
+      autoAddStatus.innerText=`Waiting ${countdown}s before next add...`;
+
+      const interval=setInterval(()=>{
+        countdown--;
+        autoAddStatus.innerText=`Waiting ${countdown}s before next add...`;
+        if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText="Resuming..."; }
+      },1000);
+
+      await new Promise(r=>setTimeout(r,delay));
+    }
+
+    // Move to next account if success or Flood
+    if(result.status==="success" || (result.reason && result.reason.toLowerCase().includes("flood"))) accIndex=(accIndex+1)%accountsList.length;
+  }
+
+  autoAddStatus.innerText="Auto Add Finished! ✅"; 
+  alert("Auto Add Finished");
+};
 // ===== History Table FloodWait =====
 const historyTable=document.getElementById("historyTable");
 const historyFloodTimers={};
