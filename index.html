@@ -244,16 +244,25 @@ startAutoAddBtn.onclick=async()=>{
     const key = m.username||m.user_id;
 
     // ✅ Skip
-    if(targetSet.has(key)){
-      logConsole(`[SKIP ${nowTime}] ${key} aready in group`);
-      const li=document.createElement("li");
-      li.innerHTML=`${key} → <span class="skipped">skipped</span> (aready in group)`;
-      autoAddList.appendChild(li);
-      processed++;
-      counter.innerText=`${processed} / ${sourceMembers.length}`;
-      progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
-      continue;
-    }
+   // ✅ Skip (COLOR VERSION)
+if(targetSet.has(key)){
+  logConsole(`<span style="color:#9999ff;">[SKIP ${nowTime}] ${key} already in group</span>`);
+
+  const li=document.createElement("li");
+  li.innerHTML=`
+    <span style="color:#9999ff;font-weight:bold;">${key}</span> →
+    <span class="skipped">SKIPPED</span>
+    <span style="color:#888;">(already in group)</span>
+  `;
+  
+  autoAddList.appendChild(li);
+
+  processed++;
+  counter.innerText=`${processed} / ${sourceMembers.length}`;
+  progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
+
+  continue; // 🚀 NO DELAY
+}
 
     // Get next account
     let nextAccIdx=getNextAvailableAccount(accIndex);
