@@ -237,7 +237,7 @@ app.post('/add-member',async(req,res)=>{
 
       status="success"
       reason="joined"
-      await sleep(30000)
+      await sleep(20000)
 
     }catch(err){
       const wait=parseFlood(err)
