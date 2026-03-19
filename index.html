@@ -48,7 +48,6 @@ td.success{color:#00ff7f;font-weight:700;}
 td.failed{color:#ff4c4c;font-weight:700;}
 td.floodwait{color:#ffcc00;font-weight:700;}
 td.skipped{color:#9999ff;font-weight:700;}
-.flood-countdown{font-weight:700;color:#ffcc00;}
 </style>
 </head>
 <body>
@@ -135,8 +134,7 @@ td.skipped{color:#9999ff;font-weight:700;}
 <script>
 // ===== Navigation =====
 document.querySelectorAll(".nav-btn").forEach(btn=>{
-  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-  document.getElementById(btn.dataset.page).classList.add("active");}
+  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active")); document.getElementById(btn.dataset.page).classList.add("active");}
 });
 
 // ===== Helpers =====
@@ -146,16 +144,10 @@ function secondsToHHMMSS(seconds){
   const s=seconds%60;
   return [h,m,s].map(v=>v.toString().padStart(2,'0')).join(':');
 }
-function parseFloodWait(reason){
-  // Parse "FloodWait 403s | Ready 3/19/2026, 3:41:52 AM"
-  if(!reason) return 0;
-  const match = reason.match(/FloodWait\s+(\d+)s/i);
-  return match?Number(match[1]):0;
-}
 
 // ===== Accounts Table =====
 const accountsTable=document.getElementById("accountsTable");
-const accountFloodTimers={};
+const accountFloodTimers={}; // countdown per account
 
 async function fetchAccounts(){
   try{
@@ -165,28 +157,34 @@ async function fetchAccounts(){
     accountsTable.innerHTML="";
     Object.keys(data).forEach(id=>{
       const acc=data[id];
-      const tr=document.createElement("tr"); tr.dataset.id=id;
+      const tr=document.createElement("tr");
+      tr.dataset.id=id;
 
       // Countdown
       let floodText="-", countdownClass="green";
       if(acc.floodWaitUntil && acc.floodWaitUntil>now){
         const remain=Math.floor((acc.floodWaitUntil-now)/1000);
-        accountFloodTimers[id] = remain;
+        accountFloodTimers[id] = remain; // store local countdown
         floodText = secondsToHHMMSS(remain); countdownClass="red";
       }
+
       const lastChecked = new Date(acc.lastChecked||now).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
       tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
       accountsTable.appendChild(tr);
     });
   }catch(e){console.log(e);}
 }
+
+// Manual refresh
 document.getElementById("refreshAccountsBtn").onclick = fetchAccounts;
+
 fetchAccounts();
 
-// Dropdown + FloodWait
+// ===== Accounts Dropdown + FloodWait =====
 const accountSelect=document.getElementById("accountSelect");
 const startAutoAddBtn=document.getElementById("startAutoAddBtn");
 const floodAlert=document.getElementById("floodAlert");
+
 async function loadAccountsDropdown(){
   try{
     const res=await fetch("/account-status"); if(!res.ok) return;
@@ -202,6 +200,7 @@ async function loadAccountsDropdown(){
         option.disabled=true; anyFlood=true;
         const remain = Math.floor((acc.floodWaitUntil-now)/1000);
         option.text += ` [${secondsToHHMMSS(remain)}]`;
+        option.title = `FloodWait ${secondsToHHMMSS(remain)}`;
       }
       accountSelect.appendChild(option);
     });
@@ -211,7 +210,7 @@ async function loadAccountsDropdown(){
 }
 loadAccountsDropdown();
 
-// ===== Countdown update =====
+// ===== FloodWait countdown update every second =====
 setInterval(()=>{
   Object.keys(accountFloodTimers).forEach(id=>{
     if(accountFloodTimers[id]>0){
@@ -222,9 +221,10 @@ setInterval(()=>{
   });
 },1000);
 
-// ===== History Table =====
+// ===== History Table FloodWait =====
 const historyTable=document.getElementById("historyTable");
 const historyFloodTimers={};
+
 async function fetchHistory(){
   try{
     const res=await fetch("/history"); const data=await res.json();
@@ -235,6 +235,7 @@ async function fetchHistory(){
         if(h.reason && h.reason.toLowerCase().includes("flood")) category="flood"; else category="failed";
       }
       if(h.status==="skipped") category="skipped";
+
       let label=category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="flood"?"FLOOD":"SKIPPED";
       let colorClass=category==="success"?"success":category==="failed"?"failed":category==="flood"?"floodwait":"skipped";
 
@@ -243,7 +244,10 @@ async function fetchHistory(){
       const time=d.toLocaleTimeString('en-US',{ timeZone:'Asia/Phnom_Penh', hour12:true });
       const groupName=h.targetGroup||'N/A';
 
-      const floodSec=parseFloodWait(h.reason);
+      let floodSec=0;
+      const floodMatch=h.reason?h.reason.match(/(\d+)\s*seconds/i):null;
+      if(floodMatch) floodSec=Number(floodMatch[1]);
+
       const rowId=`histRow${index}`;
       const tr=document.createElement("tr"); tr.id=rowId;
       tr.innerHTML=`<td>${h.username||h.user_id}</td>
@@ -254,10 +258,13 @@ async function fetchHistory(){
                     <td>${date}</td>
                     <td>${time}</td>`;
       historyTable.appendChild(tr);
+
       if(floodSec>0) historyFloodTimers[rowId]=floodSec;
     });
   }catch(e){console.log(e);}
 }
+
+// History countdown
 setInterval(()=>{
   Object.keys(historyFloodTimers).forEach(rowId=>{
     if(historyFloodTimers[rowId]>0){
@@ -267,8 +274,8 @@ setInterval(()=>{
     }
   });
 },1000);
-setInterval(fetchHistory,5000);
-fetchHistory();
+
+setInterval(fetchHistory,5000); fetchHistory();
 
 // ===== Download History =====
 document.getElementById("downloadHistoryBtn").onclick=()=>{
