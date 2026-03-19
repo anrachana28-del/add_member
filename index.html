@@ -36,7 +36,7 @@ th{background:#11141f;color:#00ff7f;}
 .page.active{display:block;}
 .progress-bar{background:#11141f;height:14px;border-radius:10px;margin-top:10px;}
 .progress{background:#00ff7f;height:14px;width:0%;border-radius:10px;transition:width 0.3s;}
-.spinner{text-align:center;margin-top:10px;}
+.spinner{text-align:center;margin-top:10px;display:none;}
 #autoAddStatus{margin:10px 0;font-weight:700;color:#00ff7f;text-align:center;}
 .countdown{font-weight:700;}
 .green{color:#00ff7f;}
@@ -134,14 +134,14 @@ async function fetchAccounts(){
         floodText=`${remain}s remaining | Ready: ${readyTime}`;
         countdownClass="red";
       }
-      const lastChecked = new Date(acc.lastChecked||now).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+      const lastChecked = new Date(acc.lastChecked||now).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
       const tr=document.createElement("tr");
       tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
       accountsTable.appendChild(tr);
     });
   }catch(e){console.log(e);}
 }
-setInterval(fetchAccounts,1000); fetchAccounts();
+setInterval(fetchAccounts,5000); fetchAccounts(); // 🔹 reduce polling
 
 // ===== Accounts dropdown =====
 const accountSelect=document.getElementById("accountSelect");
@@ -163,7 +163,7 @@ async function loadAccountsDropdown(){
         option.disabled=true;
         anyFlood=true;
         const remain = Math.floor((acc.floodWaitUntil-now)/1000);
-        const readyTime = new Date(acc.floodWaitUntil).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+        const readyTime = new Date(acc.floodWaitUntil).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
         option.text += ` [${remain}s | Ready ${readyTime}]`;
         option.title = `FloodWait ${remain}s\nReady: ${readyTime}`;
       }
@@ -173,13 +173,21 @@ async function loadAccountsDropdown(){
     floodAlert.style.display = anyFlood ? "block" : "none";
   }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
+setInterval(loadAccountsDropdown,5000); loadAccountsDropdown(); // 🔹 reduce polling
 
-// ===== Console Log Auto Scroll =====
+// ===== Console Log Auto Scroll (buffered) =====
+const autoAddConsole=document.getElementById("autoAddConsole");
+let logBuffer = [];
 function logConsole(msg){
-  autoAddConsole.innerHTML += msg + "<br>";
-  autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
+  logBuffer.push(msg);
 }
+setInterval(()=>{
+  if(logBuffer.length){
+    autoAddConsole.innerHTML += logBuffer.join("<br>");
+    autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
+    logBuffer = [];
+  }
+}, 500);
 
 // ===== Auto Export + Auto Join + Add Members =====
 const autoAddList=document.getElementById("autoAddList"),
@@ -187,7 +195,6 @@ const autoAddList=document.getElementById("autoAddList"),
       progress=document.getElementById("autoAddProgress"),
       autoAddStatus=document.getElementById("autoAddStatus"),
       loading=document.getElementById("loading"),
-      autoAddConsole=document.getElementById("autoAddConsole"),
       sourceGroupInput=document.getElementById("sourceGroupInput"),
       targetGroupInput=document.getElementById("targetGroupInput");
 
@@ -200,20 +207,13 @@ startAutoAddBtn.onclick=async()=>{
   autoAddStatus.innerText="Auto Join Source Group...";
   autoAddConsole.innerHTML="";
 
-  // 1️⃣ Auto Join Source (by link)
-  await fetch("/join-by-link",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({link:source})
-  });
+  await fetch("/join-by-link",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({link:source})});
 
-  // 2️⃣ Export Source Members
   autoAddStatus.innerText="Exporting Source Members...";
   const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
   const sourceMembers=await res.json();
   if(sourceMembers.error){ alert(sourceMembers.error); return; }
 
-  // 3️⃣ Export Target Members
   autoAddStatus.innerText="Checking Target Members...";
   const targetRes=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:target})});
   const targetMembers=await targetRes.json();
@@ -221,7 +221,6 @@ startAutoAddBtn.onclick=async()=>{
   loading.style.display="none";
 
   const targetSet=new Set(targetMembers.map(u=>u.username||u.user_id));
-
   const accRes=await fetch("/account-status"); const accData=await accRes.json();
   let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
 
@@ -243,7 +242,6 @@ startAutoAddBtn.onclick=async()=>{
     const nowTime=new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
     const key = m.username||m.user_id;
 
-    // ✅ Skip duplicates
     if(targetSet.has(key)){
       logConsole(`[SKIP ${nowTime}] ${key} already in TARGET`);
       const li=document.createElement("li");
@@ -255,10 +253,9 @@ startAutoAddBtn.onclick=async()=>{
       continue;
     }
 
-    // Get next account
     let nextAccIdx=getNextAvailableAccount(accIndex);
     if(nextAccIdx===-1){
-      autoAddStatus.innerText="All accounts FloodWait... waiting";
+      autoAddStatus.innerText="All accounts FloodWait... waiting 5s";
       await new Promise(r=>setTimeout(r,5000));
       continue;
     }
@@ -267,28 +264,21 @@ startAutoAddBtn.onclick=async()=>{
 
     logConsole(`[ADD ${nowTime}] ${key} using ${currentAccount}`);
 
-    // Add Member
-    const addRes=await fetch("/add-member",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})
-    });
+    const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
     const result=await addRes.json();
 
     const li=document.createElement("li");
     li.innerHTML=`${key} → <span class="${result.status==='success'?'success':'failed'}">${result.status}</span>`;
     autoAddList.appendChild(li);
 
-    // Add to targetSet if success
     if(result.status==="success") targetSet.add(key);
 
     processed++;
     counter.innerText=`${processed} / ${sourceMembers.length}`;
     progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
 
-    // Delay only on success
     if(result.status==="success"){
-      const delay=30000+Math.random()*10000;
+      const delay=10000+Math.random()*5000; // 🔹 smaller delay 10–15s
       let sec=Math.floor(delay/1000);
       const interval=setInterval(()=>{
         autoAddStatus.innerText=`Waiting ${sec--}s...`;
