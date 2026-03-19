@@ -328,6 +328,7 @@ startAutoAddBtn.onclick = async()=>{
 };
 
 // ===== History Table =====
+// ===== History Table =====
 const historyTable=document.getElementById("historyTable");
 async function fetchHistory(){
   const res=await fetch("/history");
@@ -335,16 +336,33 @@ async function fetchHistory(){
   historyTable.innerHTML="";
   Object.values(data).forEach(h=>{
     let category="success";
-    if(h.status==="failed"){ category = (h.reason && h.reason.toLowerCase().includes("flood")) ? "flood" : "failed"; }
+    let reasonText = h.reason || "";
+    if(h.status==="failed"){
+      if(reasonText.toLowerCase().includes("flood")) {
+        category="floodwait"; // FloodWait color/style
+        reasonText = reasonText.replace(/FloodWait.*Ready.*$/i,"FloodWait"); // កាត់ countdown
+      } else {
+        category="failed";
+      }
+    }
     if(h.status==="skipped") category="skipped";
-    const label= category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="flood"?"FLOOD":"SKIPPED";
-    const colorClass= category==="success"?"success":category==="failed"?"failed":category==="flood"?"floodwait":"skipped";
+
+    const label= category==="success"?"SUCCESS":category==="failed"?"ERROR":category==="floodwait"?"FLOOD":"SKIPPED";
+    const colorClass= category==="success"?"success":category==="failed"?"failed":category==="floodwait"?"floodwait":"skipped";
+
     const d=new Date(h.timestamp);
     const date=d.toLocaleDateString('en-GB',{timeZone:'Asia/Phnom_Penh'});
     const time=d.toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
     const groupName=h.targetGroup||'N/A';
+
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${h.username||h.user_id}</td><td class="${colorClass}">${label}</td><td>${h.accountUsed}</td><td>${h.reason}</td><td>${groupName}</td><td>${date}</td><td>${time}</td>`;
+    tr.innerHTML=`<td>${h.username||h.user_id}</td>
+                    <td class="${colorClass}">${label}</td>
+                    <td>${h.accountUsed}</td>
+                    <td>${reasonText}</td>
+                    <td>${groupName}</td>
+                    <td>${date}</td>
+                    <td>${time}</td>`;
     historyTable.appendChild(tr);
   });
 }
