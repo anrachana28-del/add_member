@@ -36,7 +36,7 @@ th{background:#11141f;color:#00ff7f;}
 .page.active{display:block;}
 .progress-bar{background:#11141f;height:14px;border-radius:10px;margin-top:10px;}
 .progress{background:#00ff7f;height:14px;width:0%;border-radius:10px;transition:width 0.3s;}
-.spinner{text-align:center;margin-top:10px;display:none;}
+.spinner{text-align:center;margin-top:10px;}
 #autoAddStatus{margin:10px 0;font-weight:700;color:#00ff7f;text-align:center;}
 .countdown{font-weight:700;}
 .green{color:#00ff7f;}
@@ -81,7 +81,7 @@ th{background:#11141f;color:#00ff7f;}
 <input id="sourceGroupInput" placeholder="Source Group (Link)"/>
 <input id="targetGroupInput" placeholder="Target Group (My Group)"/>
 <button id="startAutoAddBtn">Start Auto-Add</button>
-<div id="loading" class="spinner">⏳ Processing...</div>
+<div id="loading" class="spinner" style="display:none;">⏳ Processing...</div>
 <div id="autoAddStatus"></div>
 <div id="autoAddCounter">0 / 0</div>
 <div class="progress-bar"><div id="autoAddProgress" class="progress"></div></div>
@@ -134,14 +134,14 @@ async function fetchAccounts(){
         floodText=`${remain}s remaining | Ready: ${readyTime}`;
         countdownClass="red";
       }
-      const lastChecked = new Date(acc.lastChecked||now).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+      const lastChecked = new Date(acc.lastChecked||now).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
       const tr=document.createElement("tr");
       tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
       accountsTable.appendChild(tr);
     });
   }catch(e){console.log(e);}
 }
-setInterval(fetchAccounts,5000); fetchAccounts(); // 🔹 reduce polling
+setInterval(fetchAccounts,1000); fetchAccounts();
 
 // ===== Accounts dropdown =====
 const accountSelect=document.getElementById("accountSelect");
@@ -163,7 +163,7 @@ async function loadAccountsDropdown(){
         option.disabled=true;
         anyFlood=true;
         const remain = Math.floor((acc.floodWaitUntil-now)/1000);
-        const readyTime = new Date(acc.floodWaitUntil).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+        const readyTime = new Date(acc.floodWaitUntil).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
         option.text += ` [${remain}s | Ready ${readyTime}]`;
         option.title = `FloodWait ${remain}s\nReady: ${readyTime}`;
       }
@@ -173,28 +173,21 @@ async function loadAccountsDropdown(){
     floodAlert.style.display = anyFlood ? "block" : "none";
   }catch(e){console.log(e);}
 }
-setInterval(loadAccountsDropdown,5000); loadAccountsDropdown(); // 🔹 reduce polling
+setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
 
-// ===== Console Log Auto Scroll (buffered) =====
-const autoAddConsole=document.getElementById("autoAddConsole");
-let logBuffer = [];
+// ===== Console Log Auto Scroll =====
 function logConsole(msg){
-  logBuffer.push(msg);
+  autoAddConsole.innerHTML += msg + "<br>";
+  autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
-setInterval(()=>{
-  if(logBuffer.length){
-    autoAddConsole.innerHTML += logBuffer.join("<br>");
-    autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
-    logBuffer = [];
-  }
-}, 500);
 
-// ===== Auto Export + Auto Join + Add Members =====
+// ===== Auto Export + Add Members per-member Loop =====
 const autoAddList=document.getElementById("autoAddList"),
       counter=document.getElementById("autoAddCounter"),
       progress=document.getElementById("autoAddProgress"),
       autoAddStatus=document.getElementById("autoAddStatus"),
       loading=document.getElementById("loading"),
+      autoAddConsole=document.getElementById("autoAddConsole"),
       sourceGroupInput=document.getElementById("sourceGroupInput"),
       targetGroupInput=document.getElementById("targetGroupInput");
 
@@ -207,13 +200,16 @@ startAutoAddBtn.onclick=async()=>{
   autoAddStatus.innerText="Auto Join Source Group...";
   autoAddConsole.innerHTML="";
 
+  // 1️⃣ Auto Join Source
   await fetch("/join-by-link",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({link:source})});
 
+  // 2️⃣ Export Source Members
   autoAddStatus.innerText="Exporting Source Members...";
   const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
   const sourceMembers=await res.json();
   if(sourceMembers.error){ alert(sourceMembers.error); return; }
 
+  // 3️⃣ Export Target Members
   autoAddStatus.innerText="Checking Target Members...";
   const targetRes=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:target})});
   const targetMembers=await targetRes.json();
@@ -221,6 +217,7 @@ startAutoAddBtn.onclick=async()=>{
   loading.style.display="none";
 
   const targetSet=new Set(targetMembers.map(u=>u.username||u.user_id));
+
   const accRes=await fetch("/account-status"); const accData=await accRes.json();
   let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
 
@@ -238,6 +235,7 @@ startAutoAddBtn.onclick=async()=>{
     return -1;
   }
 
+  // ===== Loop per member =====
   for(const m of sourceMembers){
     const nowTime=new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
     const key = m.username||m.user_id;
@@ -245,7 +243,7 @@ startAutoAddBtn.onclick=async()=>{
     if(targetSet.has(key)){
       logConsole(`[SKIP ${nowTime}] ${key} already in TARGET`);
       const li=document.createElement("li");
-      li.innerHTML=`${key} → <span class="skipped">skipped</span> (duplicate)`;
+      li.innerHTML=`${key} → <span class="skipped">skipped</span>`;
       autoAddList.appendChild(li);
       processed++;
       counter.innerText=`${processed} / ${sourceMembers.length}`;
@@ -255,7 +253,7 @@ startAutoAddBtn.onclick=async()=>{
 
     let nextAccIdx=getNextAvailableAccount(accIndex);
     if(nextAccIdx===-1){
-      autoAddStatus.innerText="All accounts FloodWait... waiting 5s";
+      autoAddStatus.innerText="All accounts FloodWait... waiting";
       await new Promise(r=>setTimeout(r,5000));
       continue;
     }
@@ -264,7 +262,11 @@ startAutoAddBtn.onclick=async()=>{
 
     logConsole(`[ADD ${nowTime}] ${key} using ${currentAccount}`);
 
-    const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
+    const addRes=await fetch("/add-member",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})
+    });
     const result=await addRes.json();
 
     const li=document.createElement("li");
@@ -277,20 +279,20 @@ startAutoAddBtn.onclick=async()=>{
     counter.innerText=`${processed} / ${sourceMembers.length}`;
     progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
 
+    // ✅ Delay 20s only for success
     if(result.status==="success"){
-      const delay=10000+Math.random()*5000; // 🔹 smaller delay 10–15s
-      let sec=Math.floor(delay/1000);
+      let sec=20;
       const interval=setInterval(()=>{
         autoAddStatus.innerText=`Waiting ${sec--}s...`;
-        if(sec<=0) clearInterval(interval);
+        if(sec<0) clearInterval(interval);
       },1000);
-      await new Promise(r=>setTimeout(r,delay));
+      await new Promise(r=>setTimeout(r,20000));
     }
 
     accIndex=(accIndex+1)%accountsList.length;
   }
 
-  autoAddStatus.innerText="DONE ✅ Auto Export + Add Finished";
+  autoAddStatus.innerText="DONE ✅ Auto Add Finished";
   alert("Done 🚀");
 };
 
@@ -306,8 +308,7 @@ async function fetchHistory(){
 }
 setInterval(fetchHistory,6000); fetchHistory();
 
-const downloadHistoryBtn=document.getElementById("downloadHistoryBtn");
-downloadHistoryBtn.onclick=async()=>{
+document.getElementById("downloadHistoryBtn").onclick=async()=>{
   const res=await fetch("/history"); const data=await res.json();
   const blob=new Blob([JSON.stringify(data,null,2)]); const a=document.createElement("a");
   a.href=URL.createObjectURL(blob); a.download="history.json"; a.click();
