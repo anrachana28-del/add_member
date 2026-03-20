@@ -3,83 +3,267 @@
 <head>
 <meta charset="UTF-8">
 <title>Telegram Auto-Add PRO MAX 🚀</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>
-body{font-family:monospace;background:#0f0f0f;color:#fff;padding:20px}
-input,button{padding:5px;margin:5px;width:300px}
-.card{margin:10px 0;padding:10px;background:#1f1f1f;border-radius:5px}
+*{box-sizing:border-box;}
+body{font-family:'JetBrains Mono',monospace;background:#0f0f10;color:#fff;margin:0;padding:0;}
+.container{max-width:1000px;margin:auto;padding:15px;}
+section{background:#1e1e2a;border-radius:20px;padding:20px;margin-bottom:20px;box-shadow:0 6px 20px rgba(0,0,0,0.6);}
+.card-title{font-size:24px;font-weight:700;margin-bottom:15px;color:#00ff7f;text-align:center;}
+input, select{width:100%;padding:12px;margin-top:10px;border-radius:12px;border:none;background:#11141f;color:#fff;font-size:15px;outline:none;}
+input:focus, select:focus{border:1px solid #00ff7f;}
+button{border:none;padding:12px;border-radius:12px;cursor:pointer;font-size:15px;font-weight:600;background:#00ff7f;color:#0f0f10;transition:0.2s;}
+button:hover{background:#00cc66;color:#fff;}
+button:disabled{background:#ff4c4c;color:#fff;cursor:not-allowed;}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;}
+.btn-group button{flex:1;background:#11141f;color:#fff;}
+.btn-group button:hover{background:#00ff7f;color:#0f0f10;}
+.success{color:#00ff7f;font-weight:700;}
+.failed{color:#ff4c4c;font-weight:700;}
+.pending{color:#ffcc00;font-weight:700;}
+.skipped{color:#9999ff;font-weight:700;}
+.floodwait{background:#ffcc00;color:#000;font-weight:700;border-radius:6px;animation:blink 1.5s infinite;}
+@keyframes blink{0%,50%,100%{opacity:1;}25%,75%{opacity:0.5;}}
+.avatar{width:28px;height:28px;border-radius:50%;margin-right:8px;}
+ul{list-style:none;padding:0;margin-top:10px;max-height:400px;overflow-y:auto;}
+li{padding:8px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+li.newly-added{background:#004400;}
+.table-responsive{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;}
+th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,0.1);}
+th{background:#11141f;color:#00ff7f;}
+.page{display:none;}
+.page.active{display:block;}
+.progress-bar{background:#11141f;height:14px;border-radius:10px;margin-top:10px;}
+.progress{background:#00ff7f;height:14px;width:0%;border-radius:10px;transition:width 0.3s;}
+.spinner{text-align:center;margin-top:10px;}
+#autoAddStatus{margin:10px 0;font-weight:700;color:#00ff7f;text-align:center;}
+.countdown{font-weight:700;}
+.green{color:#00ff7f;}
+.yellow{color:#ffcc00;}
+.red{color:#ff4c4c;}
+.console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
+#floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
 </style>
 </head>
 <body>
+<div class="container">
 
-<h1>Telegram Auto-Add PRO MAX 🚀</h1>
-
-<div class="card">
-<h3>Export Members Live</h3>
-<input id="exportGroupInput" placeholder="Group username (e.g. facetoryoutlet360)">
-<button id="exportBtn">Export Members</button>
-<div id="exportResult"></div>
+<!-- Navigation -->
+<div class="btn-group">
+<button class="nav-btn" data-page="accountsPage">Accounts</button>
+<button class="nav-btn" data-page="membersPage">Auto Add</button>
+<button class="nav-btn" data-page="uploadPage">Upload</button>
+<button class="nav-btn" data-page="historyPage">History</button>
 </div>
 
-<div class="card">
-<h3>Add Member</h3>
-<input id="sourceGroupInput" placeholder="Source Group username">
-<input id="targetGroupInput" placeholder="Target Group username">
-<button id="addMemberBtn">Add Members</button>
-<div id="addResult"></div>
+<!-- Accounts -->
+<section id="accountsPage" class="page active">
+<div class="card-title">Accounts Status</div>
+<div class="table-responsive">
+<table>
+<thead>
+<tr>
+<th>ID</th><th>Phone</th><th>Status</th><th>FloodWait</th><th>Last Checked</th>
+</tr>
+</thead>
+<tbody id="accountsTable"></tbody>
+</table>
 </div>
+</section>
 
-<div class="card">
-<h3>History / Logs</h3>
-<button id="loadHistoryBtn">Load History</button>
-<div id="historyResult"></div>
+<!-- Auto Add + Live Members -->
+<section id="membersPage" class="page">
+<div class="card-title">Auto Add Members + Live Target Group</div>
+
+<label>Source Group:</label>
+<input id="sourceGroupInput" placeholder="Source Group">
+<label>Target Group:</label>
+<input id="targetGroupInput" placeholder="Target Group">
+<button id="startAutoAddBtn">Start Auto-Add</button>
+
+<div id="autoAddStatus"></div>
+<div id="autoAddCounter">0 / 0</div>
+<div class="progress-bar"><div id="autoAddProgress" class="progress"></div></div>
+
+<ul id="autoAddList"></ul>
+<div class="console-log" id="autoAddConsole"></div>
+
+<hr>
+<div class="card-title">Target Group Members Live</div>
+<input id="targetGroupInputLive" placeholder="Target Group Live">
+<button id="showMembersBtn">Show Members</button>
+<ul id="targetMembersListLive"></ul>
+</section>
+
+<!-- Upload -->
+<section id="uploadPage" class="page">
+<div class="card-title">Upload Accounts</div>
+<input id="phoneInput" placeholder="Phone +855">
+<input id="apiIdInput" placeholder="API ID">
+<input id="apiHashInput" placeholder="API HASH">
+<input id="sessionInput" placeholder="Session String">
+<button id="addAccountBtn">Add Account</button><br><br>
+<input type="file" id="file" accept=".txt">
+<button id="uploadBtn">Upload File</button>
+<div id="uploadStats"></div>
+</section>
+
+<!-- History -->
+<section id="historyPage" class="page">
+<div class="card-title">History</div>
+<ul id="historyList"></ul>
+<button id="downloadHistoryBtn">Download History</button>
+</section>
+
 </div>
 
 <script>
-const exportBtn=document.getElementById('exportBtn')
-const exportGroupInput=document.getElementById('exportGroupInput')
-const exportResult=document.getElementById('exportResult')
+// ===== Navigation =====
+document.querySelectorAll(".nav-btn").forEach(btn=>{
+  btn.onclick=()=>{document.querySelectorAll(".page").forEach(p=>p.classList.remove("active")); document.getElementById(btn.dataset.page).classList.add("active");}
+});
 
-exportBtn.onclick=async()=>{
-  const group=exportGroupInput.value.trim()
-  if(!group) return alert("Enter group username")
-  exportResult.innerText="Fetching members..."
-  await fetch('/members-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({group})})
-  const link = document.createElement('a')
-  link.href=`/export/${group}`
-  link.innerText="Download JSON"
-  exportResult.innerHTML=""; exportResult.appendChild(link)
+// ===== Accounts Table =====
+const accountsTable=document.getElementById("accountsTable");
+async function fetchAccounts(){
+  try{
+    const res=await fetch("/account-status"); if(!res.ok) return;
+    const data=await res.json();
+    const now=Date.now();
+    accountsTable.innerHTML="";
+    Object.keys(data).forEach(id=>{
+      const acc=data[id];
+      let floodText="-", countdownClass="green";
+      if(acc.floodWaitUntil && acc.floodWaitUntil>now){
+        const remain=Math.floor((acc.floodWaitUntil-now)/1000);
+        const readyTime = new Date(acc.floodWaitUntil).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+        floodText=`${remain}s remaining | Ready: ${readyTime}`;
+        countdownClass="red";
+      }
+      const lastChecked = new Date(acc.lastChecked||now).toLocaleString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${id}</td><td>${acc.phone}</td><td>${acc.status}</td><td class="countdown ${countdownClass}">${floodText}</td><td>${lastChecked}</td>`;
+      accountsTable.appendChild(tr);
+    });
+  }catch(e){console.log(e);}
+}
+setInterval(fetchAccounts,1000); fetchAccounts();
+
+// ===== Console Log =====
+function logConsole(msg){
+  autoAddConsole.innerHTML += msg + "<br>";
+  autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
 
-// Add member button logic (simplified)
-const addMemberBtn=document.getElementById('addMemberBtn')
-const sourceGroupInput=document.getElementById('sourceGroupInput')
-const targetGroupInput=document.getElementById('targetGroupInput')
-const addResult=document.getElementById('addResult')
+// ===== Auto Add Members =====
+const autoAddList=document.getElementById("autoAddList"),
+      counter=document.getElementById("autoAddCounter"),
+      progress=document.getElementById("autoAddProgress"),
+      autoAddStatus=document.getElementById("autoAddStatus"),
+      autoAddConsole=document.getElementById("autoAddConsole"),
+      sourceGroupInput=document.getElementById("sourceGroupInput"),
+      targetGroupInput=document.getElementById("targetGroupInput");
 
-addMemberBtn.onclick=async()=>{
-  const src=sourceGroupInput.value.trim()
-  const tgt=targetGroupInput.value.trim()
-  if(!src||!tgt) return alert("Enter both groups")
-  addResult.innerText="Scraping members..."
-  const res = await fetch('/members-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({group:src})})
-  const data=await res.json()
-  if(data.error){addResult.innerText="Error: "+data.error; return}
-  addResult.innerText="Adding members..."
-  for(const m of data.members || data){
-    await fetch('/add-member',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:tgt})})
-    addResult.innerText=`Added: ${m.username||m.user_id}`
-    await new Promise(r=>setTimeout(r,2000))
+const targetGroupInputLive=document.getElementById("targetGroupInputLive"),
+      showMembersBtn=document.getElementById("showMembersBtn"),
+      targetMembersListLive=document.getElementById("targetMembersListLive");
+
+let liveInterval;
+
+// ===== Fetch Live Target Members =====
+async function fetchTargetMembersLive(){
+  const group = targetGroupInputLive.value.trim();
+  if(!group) return;
+  targetMembersListLive.innerHTML = "⏳ Loading...";
+  const res = await fetch("/group-members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group})});
+  const members = await res.json();
+  targetMembersListLive.innerHTML = "";
+  if(!members.error){
+    members.forEach(m=>{
+      const li = document.createElement("li");
+      li.innerHTML = `<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id}`;
+      if(Date.now() - (m.timestamp||0) < 15000) li.classList.add("newly-added"); // highlight new member
+      targetMembersListLive.appendChild(li);
+    });
   }
-  addResult.innerText+="\nDone."
 }
 
-// History
-document.getElementById('loadHistoryBtn').onclick=async()=>{
-  const res=await fetch('/history')
-  const data=await res.json()
-  const div=document.getElementById('historyResult')
-  div.innerHTML=JSON.stringify(data,null,2)
-}
+// Live update every 10s
+showMembersBtn.onclick = ()=>{
+  fetchTargetMembersLive();
+  if(liveInterval) clearInterval(liveInterval);
+  liveInterval = setInterval(fetchTargetMembersLive,10000);
+};
+
+// ===== Start Auto Add =====
+startAutoAddBtn.onclick=async()=>{
+  const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
+  if(!source||!target) return alert("Enter groups");
+
+  autoAddStatus.innerText="Fetching members...";
+  autoAddConsole.innerHTML="";
+  autoAddList.innerHTML="";
+  
+  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
+  const members=await res.json();
+  if(members.error){ alert(members.error); return; }
+
+  const histRes=await fetch("/history"); 
+  const histData=await histRes.json(); 
+  const histList = Object.values(histData||{});
+
+  let processed=0;
+  counter.innerText=`0 / ${members.length}`;
+  progress.style.width="0%";
+
+  for(const m of members){
+    // Skip if in history
+    if(histList.some(h=>h.username===m.username || h.user_id===m.user_id)){
+      logConsole(`[SKIP] ${m.username||m.user_id} already in history`);
+      processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor(processed/members.length*100)}%`;
+      continue;
+    }
+
+    // Skip if already in target group live
+    const liveRes=await fetch("/group-members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:target})});
+    const liveMembers=await liveRes.json();
+    if(liveMembers.some(u=>u.username===m.username || u.user_id===m.user_id)){
+      logConsole(`[SKIP] ${m.username||m.user_id} already in Target Group`);
+      processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor(processed/members.length*100)}%`;
+      continue;
+    }
+
+    // Add Member
+    autoAddStatus.innerText = `Adding ${m.username||m.user_id}...`;
+    const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
+    const result=await addRes.json();
+
+    const li=document.createElement("li");
+    li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <br>Reason: ${result.reason||'N/A'}`;
+    autoAddList.appendChild(li);
+    autoAddList.scrollTop=autoAddList.scrollHeight;
+
+    processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor(processed/members.length*100)}%`;
+
+    // Delay 30-40s
+    if(result.status==="success"){
+      let delay = 30000 + Math.floor(Math.random()*10000);
+      let countdown = Math.floor(delay/1000);
+      autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+      const interval = setInterval(()=>{
+        countdown--;
+        autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+        if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText="Resuming Auto Add..."; }
+      },1000);
+      await new Promise(r=>setTimeout(r, delay));
+    }
+  }
+
+  autoAddStatus.innerText="Auto Add Finished! ✅";
+  alert("Auto Add Finished");
+};
 </script>
 </body>
 </html>
