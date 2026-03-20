@@ -198,6 +198,142 @@ async function loadAccountsDropdown(){
   }catch(e){console.log(e);}
 }
 setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
+
+
+  // ===== Helper: Check Chinese characters =====
+function hasChineseChars(str){
+  if(!str) return false;
+  return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(str);
+}
+
+// ===== Auto Add Members =====
+const autoAddList = document.getElementById("autoAddList"),
+      counter = document.getElementById("autoAddCounter"),
+      progress = document.getElementById("autoAddProgress"),
+      autoAddStatus = document.getElementById("autoAddStatus"),
+      loading = document.getElementById("loading"),
+      autoAddConsole = document.getElementById("autoAddConsole"),
+      sourceGroupInput = document.getElementById("sourceGroupInput"),
+      targetGroupInput = document.getElementById("targetGroupInput");
+
+startAutoAddBtn.onclick = async () => {
+  const source = sourceGroupInput.value.trim(),
+        target = targetGroupInput.value.trim();
+  if(!source || !target) return alert("Enter Source and Target groups");
+
+  loading.style.display = "block";
+  autoAddStatus.innerText = "Fetching members...";
+  autoAddConsole.innerHTML = "";
+
+  // Fetch members from source
+  const res = await fetch("/members", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({group:source})
+  });
+  const members = await res.json();
+  loading.style.display = "none";
+  if(members.error){ alert(members.error); return; }
+
+  // Fetch accounts
+  const accRes = await fetch("/account-status"); 
+  const accData = await accRes.json();
+  let accountsList = Object.keys(accData), accIndex = 0, processed = 0, skippedCount = 0;
+
+  // Fetch history
+  const histRes = await fetch("/history");
+  const histData = await histRes.json();
+  const histList = Object.values(histData||{});
+
+  autoAddList.innerHTML = "";
+  counter.innerText = `0 / ${members.length}`;
+  progress.style.width = `0%`;
+
+  // Find next available account
+  function getNextAvailableAccount(startIndex){
+    const now = Date.now();
+    for(let i=0;i<accountsList.length;i++){
+      let idx = (startIndex+i)%accountsList.length;
+      const acc = accData[accountsList[idx]];
+      if(acc.status === "active" && (!acc.floodWaitUntil || acc.floodWaitUntil <= now)){
+        return idx;
+      }
+    }
+    return -1;
+  }
+
+  for(let i=0; i<members.length; i++){
+    const m = members[i];
+
+    // ===== Skip Chinese names =====
+    if(hasChineseChars(m.first_name) || hasChineseChars(m.last_name)){
+      skippedCount++;
+      logConsole(`[SKIP] ${m.username||m.user_id} → Name contains Chinese characters`);
+      counter.innerText = `${i+1} / ${members.length}`;
+      progress.style.width = `${Math.floor((i+1)/members.length*100)}%`;
+      continue;
+    }
+
+    // ===== Skip history =====
+    const alreadyHistory = histList.some(h => (h.username===m.username || h.user_id===m.user_id) && h.status==="success");
+    if(alreadyHistory){
+      skippedCount++;
+      logConsole(`[SKIP] ${m.username||m.user_id} → Already in history`);
+      counter.innerText = `${i+1} / ${members.length}`;
+      progress.style.width = `${Math.floor((i+1)/members.length*100)}%`;
+      continue;
+    }
+
+    // ===== Select available account =====
+    let nextAccIdx = getNextAvailableAccount(accIndex);
+    if(nextAccIdx === -1){
+      autoAddStatus.innerText = "All accounts FloodWait. Waiting...";
+      await new Promise(r=>setTimeout(r,5000));
+      nextAccIdx = getNextAvailableAccount(accIndex);
+      if(nextAccIdx === -1) break;
+    }
+    accIndex = nextAccIdx;
+    const currentAccount = accountsList[accIndex];
+
+    logConsole(`[INFO] Using ${currentAccount} for ${m.username||m.user_id}`);
+
+    // ===== Add member =====
+    const addRes = await fetch("/add-member",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})
+    });
+    const result = await addRes.json();
+
+    // ===== Update UI =====
+    const li = document.createElement("li");
+    li.innerHTML = `<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <span class="pending">[${new Date().toLocaleTimeString()}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
+    autoAddList.appendChild(li); autoAddList.scrollTop = autoAddList.scrollHeight;
+
+    processed++;
+    counter.innerText = `${processed} / ${members.length}`;
+    progress.style.width = `${Math.floor((processed/members.length)*100)}%`;
+
+    // ===== Wait if success =====
+    if(result.status==="success"){
+      const delay = 30000 + Math.floor(Math.random()*10000); // 30–40s
+      let countdown = Math.floor(delay/1000);
+      autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+      const interval = setInterval(()=>{
+        countdown--;
+        autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+        if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText = "Resuming Auto Add..."; }
+      },1000);
+      await new Promise(r=>setTimeout(r, delay));
+    }
+
+    // Rotate account
+    if(result.status==="success" || (result.reason && result.reason.includes("FloodWait"))) accIndex=(accIndex+1)%accountsList.length;
+  }
+
+  autoAddStatus.innerText = `Auto Add Finished! ✅ Skipped: ${skippedCount}`;
+  alert(`Auto Add Finished! Skipped ${skippedCount} members`);
+};
 </script>
 </body>
 </html>
