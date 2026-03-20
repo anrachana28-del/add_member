@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import express from 'express'
 import { initializeApp } from 'firebase/app'
-import { getDatabase, ref, update, get, push, set } from 'firebase/database'
+import { getDatabase, ref, update, get, push } from 'firebase/database'
 import { TelegramClient, Api } from 'telegram'
 import { StringSession } from 'telegram/sessions/index.js'
 import path from 'path'
@@ -31,6 +31,7 @@ while(process.env[`TG_ACCOUNT_${i}_PHONE`]){
   const api_hash=process.env[`TG_ACCOUNT_${i}_API_HASH`]
   const session=process.env[`TG_ACCOUNT_${i}_SESSION`]
   const phone=process.env[`TG_ACCOUNT_${i}_PHONE`]
+
   if(!api_id||!api_hash||!session){i++; continue}
 
   accounts.push({
@@ -42,10 +43,15 @@ while(process.env[`TG_ACCOUNT_${i}_PHONE`]){
   i++
 }
 
-// ===== Telegram Client =====
+// ===== Client =====
 async function getClient(account){
   if(clients[account.id]) return clients[account.id]
-  const client=new TelegramClient(new StringSession(account.session), account.api_id, account.api_hash, {connectionRetries:5})
+  const client=new TelegramClient(
+    new StringSession(account.session),
+    account.api_id,
+    account.api_hash,
+    {connectionRetries:5}
+  )
   await client.connect()
   clients[account.id]=client
   return client
@@ -61,7 +67,7 @@ function parseFlood(err){
   return null
 }
 
-// ===== Refresh Account =====
+// ===== Auto Clear FloodWait =====
 async function refreshAccountStatus(account){
   if(account.floodWaitUntil && account.floodWaitUntil < Date.now()){
     account.floodWaitUntil = null
@@ -92,13 +98,16 @@ async function checkTGAccount(account){
 
   }catch(err){
     const wait=parseFlood(err)
+
     let status="error", floodUntil=null
+
     if(wait){
       status="floodwait"
       floodUntil=Date.now()+wait*1000
       account.floodWaitUntil=floodUntil
       account.status="floodwait"
     }
+
     await update(ref(db,`accounts/${account.id}`),{
       status,
       floodWaitUntil:floodUntil,
@@ -126,35 +135,7 @@ function getAvailableAccount(){
   return accounts.find(a => a.status === "active" && (!a.floodWaitUntil || a.floodWaitUntil < now))
 }
 
-// ===== Auto Scrape My Groups Members =====
-async function autoScrapeAllGroups(account){
-  const client = await getClient(account)
-  const dialogs = await client.getDialogs()
-  for(const dialog of dialogs){
-    if(dialog.isGroup){
-      const groupId = dialog.id.toString()
-      const participants = await client.getParticipants(dialog.id)
-      for(const m of participants){
-        const memberRef = ref(db, `mygroup_members/${groupId}/${m.id}`)
-        const snap = await get(memberRef)
-        if(!snap.exists()){
-          await set(memberRef,{
-            username:m.username||null,
-            first_name:m.first_name||null,
-            last_name:m.last_name||null,
-            avatar:m.photo?`https://t.me/i/userpic/320/${m.id}.jpg`:null,
-            access_hash:m.access_hash ? m.access_hash.toString() : null,
-            timestamp:Date.now()
-          })
-        }
-      }
-      console.log(`Scraped group ${dialog.title} | Members: ${participants.length}`)
-      await sleep(1000)
-    }
-  }
-}
-
-// ===== Members Endpoint =====
+// ===== Members =====
 app.post('/members',async(req,res)=>{
   try{
     const {group}=req.body
@@ -174,18 +155,9 @@ app.post('/members',async(req,res)=>{
     const members=all.filter(p=>!p.bot).map(p=>({
       user_id:p.id,
       username:p.username,
-      access_hash:p.access_hash ? p.access_hash.toString() : null,
+      access_hash:p.access_hash,
       avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
     }))
-
-    // Auto save to Firebase
-    for(const m of members){
-      const memberRef = ref(db, `mygroup_members/${entity.id}/${m.user_id}`)
-      const snap = await get(memberRef)
-      if(!snap.exists()){
-        await set(memberRef,{...m,timestamp:Date.now()})
-      }
-    }
 
     res.json(members)
   }catch(err){
@@ -193,7 +165,40 @@ app.post('/members',async(req,res)=>{
   }
 })
 
-// ===== Add Member Endpoint =====
+// ===== Export Target Group Members =====
+app.post('/export-members', async(req,res)=>{
+  try{
+    const {targetGroup}=req.body
+    if(!targetGroup) return res.json({error:"Missing targetGroup"})
+
+    const acc = getAvailableAccount()
+    if(!acc) return res.json({error:"No active account"})
+
+    const client = await getClient(acc)
+    const entity = await client.getEntity(targetGroup)
+
+    let offset=0, limit=200, all=[]
+    while(true){
+      const participants = await client.getParticipants(entity,{limit,offset})
+      if(!participants.length) break
+      all.push(...participants)
+      offset+=participants.length
+    }
+
+    const members = all.filter(p=>!p.bot).map(p=>({
+      user_id:p.id,
+      username:p.username,
+      access_hash:p.access_hash,
+      avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
+    }))
+
+    res.json({count:members.length, members})
+  }catch(err){
+    res.json({error:err.message})
+  }
+})
+
+// ===== Add Member =====
 app.post('/add-member',async(req,res)=>{
   try{
     const {username,user_id,access_hash,targetGroup}=req.body
@@ -259,15 +264,7 @@ app.post('/add-member',async(req,res)=>{
 
       status="success"
       reason="joined"
-
-      // Save to Firebase
-      await set(ref(db, `mygroup_members/${targetGroup}/${user_id}`),{
-        username,user_id,avatar:`https://t.me/i/userpic/320/${user_id}.jpg`,
-        access_hash: access_hash || null,
-        timestamp:Date.now()
-      })
-
-      await sleep(30000 + Math.floor(Math.random()*10000))
+      await sleep(30000 + Math.floor(Math.random()*10000)) // 30–40s
 
     }catch(err){
       const wait=parseFlood(err)
@@ -275,42 +272,33 @@ app.post('/add-member',async(req,res)=>{
         const until=Date.now()+wait*1000
         clientAcc.floodWaitUntil=until
         clientAcc.status="floodwait"
-        await update(ref(db,`accounts/${clientAcc.id}`),{ status:"floodwait", floodWaitUntil:until })
-        reason=`FloodWait ${wait}s | Ready ${new Date(until).toLocaleString()}`
+
+        await update(ref(db,`accounts/${clientAcc.id}`),{
+          status:"floodwait",
+          floodWaitUntil:until
+        })
+
+        const ready=new Date(until).toLocaleString()
+        reason=`FloodWait ${wait}s | Ready ${ready}`
       }else{
         reason=err.message
       }
     }
 
     await push(ref(db,'history'),{
-      username,user_id,
-      access_hash: access_hash || null,
-      status,reason,accountUsed:clientAcc.id,timestamp:Date.now()
+      username,user_id,status,reason,
+      accountUsed:clientAcc.id,
+      timestamp:Date.now()
     })
 
     res.json({status,reason,accountUsed:clientAcc.id})
 
   }catch(err){
-    res.json({status:"failed", reason:err.message, accountUsed:"unknown"})
-  }
-})
-
-// ===== MyGroup Cache Endpoint =====
-app.get('/mygroup-cache',async(req,res)=>{
-  try{
-    const snap = await get(ref(db,'mygroup_members'))
-    const val = snap.val()||{}
-    function serialize(obj){
-      if(!obj || typeof obj !== "object") return obj
-      const res = {}
-      for(const k in obj){
-        res[k] = (typeof obj[k] === "bigint") ? obj[k].toString() : serialize(obj[k])
-      }
-      return res
-    }
-    res.json(serialize(val))
-  }catch(err){
-    res.status(500).json({error:err.message})
+    res.json({
+      status:"failed",
+      reason:err.message,
+      accountUsed:"unknown"
+    })
   }
 })
 
@@ -319,6 +307,7 @@ app.get('/account-status',async(req,res)=>{
   const snap=await get(ref(db,'accounts'))
   const now=Date.now()
   const data=snap.val()||{}
+
   for(const id in data){
     const a=data[id]
     if(a.floodWaitUntil){
@@ -326,7 +315,10 @@ app.get('/account-status',async(req,res)=>{
       if(remain<=0){
         a.status="active"
         a.floodWaitUntil=null
-        await update(ref(db,`accounts/${id}`),{status:"active",floodWaitUntil:null})
+        await update(ref(db,`accounts/${id}`),{
+          status:"active",
+          floodWaitUntil:null
+        })
       }else{
         a.readyTime=new Date(a.floodWaitUntil).toLocaleString()
         a.remaining=remain
@@ -349,10 +341,3 @@ app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'index.html')))
 
 const PORT=process.env.PORT||3000
 app.listen(PORT,()=>console.log(`🚀 Server running on ${PORT}`))
-
-// ===== Auto Scrape My Groups Scheduler =====
-setInterval(async ()=>{
-  for(const acc of accounts){
-    try{ await autoScrapeAllGroups(acc) } catch(e){ console.log(e) }
-  }
-}, 10*60*1000)
