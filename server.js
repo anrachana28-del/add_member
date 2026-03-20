@@ -115,14 +115,14 @@ async function autoScrapeAllGroups(account){
             username:m.username||null,
             first_name:m.first_name||null,
             last_name:m.last_name||null,
-            access_hash:m.access_hash ? BigInt(m.access_hash).toString() : null,
+            access_hash: m.accessHash ? m.accessHash.toString() : null, // serialize BigInt
             avatar:m.photo?`https://t.me/i/userpic/320/${m.id}.jpg`:null,
             timestamp:Date.now()
           });
         }
       }
       console.log(`Scraped group ${dialog.title} | Members: ${participants.length}`);
-      await sleep(1000); // small delay
+      await sleep(1000);
     }
   }
 }
@@ -147,7 +147,7 @@ app.post('/members',async(req,res)=>{
     const members = all.filter(p=>!p.bot).map(p=>({
       user_id:p.id,
       username:p.username,
-      access_hash:p.access_hash ? BigInt(p.access_hash).toString() : null,
+      access_hash:p.accessHash ? p.accessHash.toString() : null, // serialize BigInt
       avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
     }));
 
@@ -163,6 +163,30 @@ app.post('/members',async(req,res)=>{
     res.json(members);
   }catch(err){
     res.json({error:err.message});
+  }
+});
+
+// ===== MyGroup Cache Endpoint =====
+app.get('/mygroup-cache', async (req, res) => {
+  try{
+    const snap = await get(ref(db,'mygroup_members'));
+    const val = snap.val() || {};
+    // Serialize BigInts as strings
+    function serialize(obj){
+      if(Array.isArray(obj)) return obj.map(serialize);
+      if(obj && typeof obj === "object"){
+        const res = {};
+        for(const k in obj){
+          if(typeof obj[k] === "bigint") res[k] = obj[k].toString();
+          else res[k] = serialize(obj[k]);
+        }
+        return res;
+      }
+      return obj;
+    }
+    res.json(serialize(val));
+  }catch(err){
+    res.status(500).json({error:err.message});
   }
 });
 
@@ -199,7 +223,7 @@ app.post('/add-member',async(req,res)=>{
 
       // Save to Firebase
       await set(ref(db, `mygroup_members/${targetGroup}/${user_id}`),{
-        username,user_id,access_hash:access_hash||null, avatar:`https://t.me/i/userpic/320/${user_id}.jpg`, timestamp:Date.now()
+        username,user_id,access_hash:access_hash||null,avatar:`https://t.me/i/userpic/320/${user_id}.jpg`, timestamp:Date.now()
       });
 
       await sleep(30000 + Math.floor(Math.random()*10000));
