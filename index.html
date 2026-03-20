@@ -175,132 +175,76 @@ async function loadAccountsDropdown(){
 }
 setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
 
-// ===== Console log helper =====
-const autoAddConsole=document.getElementById("autoAddConsole");
+// ===== Console Log Auto Scroll =====
 function logConsole(msg){
   autoAddConsole.innerHTML += msg + "<br>";
-  const lines = autoAddConsole.innerHTML.split("<br>");
-  if(lines.length > 500){ autoAddConsole.innerHTML = lines.slice(lines.length-500).join("<br>"); }
   autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
 
-// ===== Detect Chinese =====
-function hasChinese(text){ return /[\u4e00-\u9fff]/.test(text || ""); }
+// ===== Auto Add Members with Live Firebase Check =====
+const autoAddList=document.getElementById("autoAddList"),
+      counter=document.getElementById("autoAddCounter"),
+      progress=document.getElementById("autoAddProgress"),
+      autoAddStatus=document.getElementById("autoAddStatus"),
+      loading=document.getElementById("loading"),
+      autoAddConsole=document.getElementById("autoAddConsole"),
+      sourceGroupInput=document.getElementById("sourceGroupInput"),
+      targetGroupInput=document.getElementById("targetGroupInput");
 
-// ===== Auto Add Members =====
-const autoAddStatus=document.getElementById("autoAddStatus");
-const autoAddList=document.getElementById("autoAddList");
-const counter=document.getElementById("autoAddCounter");
-const progress=document.getElementById("autoAddProgress");
-const sourceGroupInput=document.getElementById("sourceGroupInput");
-const targetGroupInput=document.getElementById("targetGroupInput");
+startAutoAddBtn.onclick=async()=>{
+  const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
+  if(!source||!target) return alert("Enter groups");
 
-// ===== Auto Add Members without Delay, with Target Firebase Export =====
-startAutoAddBtn.onclick = async () => {
-  const source = sourceGroupInput.value.trim();
-  const target = targetGroupInput.value.trim();
-  if (!source || !target) return alert("Enter both Source & Target groups");
+  loading.style.display="block"; autoAddStatus.innerText="Fetching source members..."; autoAddConsole.innerHTML="";
 
-  autoAddStatus.innerText = "⏳ Exporting Target Group members to Firebase...";
-  autoAddConsole.innerHTML = "";
-  autoAddList.innerHTML = "";
-  counter.innerText = "0 / 0";
-  progress.style.width = "0%";
+  // Fetch members from source
+  const srcRes=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
+  const sourceMembers=await srcRes.json(); loading.style.display="none";
+  if(sourceMembers.error){ alert(sourceMembers.error); return; }
 
-  // 1️⃣ Fetch Target Group members first
-  const resTarget = await fetch("/members", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ group: target })
-  });
-  const targetMembers = await resTarget.json();
-  if (targetMembers.error) return alert(targetMembers.error);
+  // Fetch live target members from Firebase
+  const tgtRes=await fetch("/members-live"); const targetMembersData=await tgtRes.json()||{};
+  const targetUserIds = new Set(Object.keys(targetMembersData));
+  const targetUsernames = new Set(Object.values(targetMembersData).map(m=>m.username).filter(Boolean));
 
-  // 2️⃣ Save Target members to Firebase automatically
-  await fetch("/save-target-members", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ group: target, members: targetMembers })
-  });
+  autoAddList.innerHTML=""; counter.innerText=`0 / ${sourceMembers.length}`; progress.style.width=`0%`;
 
-  autoAddStatus.innerText = `✅ Target members exported (${targetMembers.length})`;
+  let processed=0;
 
-  // 3️⃣ Fetch Source Group members
-  const resSource = await fetch("/members", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ group: source })
-  });
-  const sourceMembers = await resSource.json();
-  if (sourceMembers.error) return alert(sourceMembers.error);
+  for(const m of sourceMembers){
+    const nowTime = new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
 
-  // 4️⃣ Skip members already in target
-  const targetIds = new Set(targetMembers.map(m => m.user_id));
-  const membersToAdd = sourceMembers.filter(m => !targetIds.has(m.user_id));
-
-  autoAddStatus.innerText = `✅ Ready to add ${membersToAdd.length} members (skipped ${sourceMembers.length - membersToAdd.length})`;
-  counter.innerText = `0 / ${membersToAdd.length}`;
-
-  // 5️⃣ Fetch accounts
-  const accRes = await fetch("/account-status");
-  const accData = await accRes.json();
-  const accountsList = Object.keys(accData);
-  let accIndex = 0;
-  let processed = 0;
-
-  function getNextAvailableAccount(startIndex) {
-    const now = Date.now();
-    for (let i = 0; i < accountsList.length; i++) {
-      const idx = (startIndex + i) % accountsList.length;
-      const acc = accData[accountsList[idx]];
-      if (acc.status === "active" && (!acc.floodWaitUntil || acc.floodWaitUntil <= now)) {
-        return idx;
-      }
+    // Skip if already in target
+    if((m.user_id && targetUserIds.has(m.user_id)) || (m.username && targetUsernames.has(m.username))){
+      logConsole(`[SKIP ${nowTime}] ${m.username||m.user_id} already in target`);
+      processed++; counter.innerText=`${processed} / ${sourceMembers.length}`;
+      progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
+      continue;
     }
-    return -1;
+
+    // Add member via API
+    const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,targetGroup:target})});
+    const result=await addRes.json();
+
+    const li=document.createElement("li");
+    li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
+    autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
+
+    processed++; counter.innerText=`${processed} / ${sourceMembers.length}`;
+    progress.style.width=`${Math.floor((processed/sourceMembers.length)*100)}%`;
+
+    if(result.status==="success"){ await new Promise(r=>setTimeout(r,30000+Math.floor(Math.random()*10000))); }
   }
 
-  // 6️⃣ Add members immediately, skip if exists
-  for (const m of membersToAdd) {
-    const nowTime = new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Phnom_Penh', hour12: true });
-    const nextAccIdx = getNextAvailableAccount(accIndex);
-    if (nextAccIdx === -1) {
-      autoAddStatus.innerText = "⚠️ All accounts FloodWait. Waiting 5s...";
-      await new Promise(r => setTimeout(r, 5000));
-      accIndex = getNextAvailableAccount(accIndex);
-      if (accIndex === -1) break;
-    } else {
-      accIndex = nextAccIdx;
-    }
-    const currentAccount = accountsList[accIndex];
-
-    logConsole(`[INFO ${nowTime}] Adding ${m.username || m.user_id} using ${currentAccount}`);
-    autoAddStatus.innerText = `Adding ${m.username || m.user_id} with ${currentAccount}`;
-
-    // Add member endpoint
-    const addRes = await fetch("/add-member", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: m.username, user_id: m.user_id, access_hash: m.access_hash, targetGroup: target })
-    });
-    const result = await addRes.json();
-
-    const li = document.createElement("li");
-    li.innerHTML = `<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username || m.user_id} → <span class="${result.status === 'success' ? 'success' : result.status === 'skipped' ? 'skipped' : 'failed'}">${result.status}</span> by ${result.accountUsed || currentAccount} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason || 'N/A'}</span>`;
-    autoAddList.appendChild(li);
-    autoAddList.scrollTop = autoAddList.scrollHeight;
-
-    processed++;
-    counter.innerText = `${processed} / ${membersToAdd.length}`;
-    progress.style.width = `${Math.floor((processed / membersToAdd.length) * 100)}%`;
-
-    // Rotate account for next member
-    accIndex = (accIndex + 1) % accountsList.length;
-  }
-
-  autoAddStatus.innerText = "✅ Auto Add Finished!";
-  alert("Auto Add Finished!");
+  autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
 };
+
+// ===== Live Members View =====
+async function fetchLiveMembers(){
+  const res = await fetch("/members-live"); const data = await res.json();
+  return data || {};
+}
+
 // ===== History =====
 const historyList=document.getElementById("historyList");
 async function fetchHistory(){
