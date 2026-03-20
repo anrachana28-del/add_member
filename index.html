@@ -205,20 +205,61 @@ const autoAddList=document.getElementById("autoAddList"),
       sourceGroupInput=document.getElementById("sourceGroupInput"),
       targetGroupInput=document.getElementById("targetGroupInput");
 
-startAutoAddBtn.onclick=async()=>{
-  const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
-  if(!source||!target) return alert("Enter groups");
-  loading.style.display="block"; autoAddStatus.innerText="Fetching members..."; autoAddConsole.innerHTML="";
-  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
-  const members=await res.json(); loading.style.display="none";
-  if(members.error){ alert(members.error); return; }
+startAutoAddBtn.onclick = async () => {
+  const source = sourceGroupInput.value.trim(),
+        target = targetGroupInput.value.trim();
 
-  const accRes=await fetch("/account-status"); const accData=await accRes.json();
-  let accountsList=Object.keys(accData); let accIndex=0; let processed=0;
+  if (!source || !target) return alert("Enter groups");
 
-  const histRes=await fetch("/history"); const histData=await histRes.json(); const histList = Object.values(histData||{});
+  loading.style.display = "block";
+  autoAddStatus.innerText = "Fetching source members...";
+  autoAddConsole.innerHTML = "";
 
-  autoAddList.innerHTML=""; counter.innerText=`0 / ${members.length}`; progress.style.width=`0%`;
+  // ===== 1. Source Members =====
+  const res = await fetch("/members", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ group: source })
+  });
+  const members = await res.json();
+  if (members.error) { loading.style.display="none"; return alert(members.error); }
+
+  // ===== 🔥 2. AUTO EXPORT Target Group =====
+  autoAddStatus.innerText = "Exporting target members...";
+  const exportRes = await fetch("/export-members", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ targetGroup: target })
+  });
+  const exportData = await exportRes.json();
+  if (exportData.error) { loading.style.display="none"; return alert(exportData.error); }
+
+  const targetMembers = exportData.members || [];
+
+  // ===== Build FAST Set =====
+  const targetSet = new Set(targetMembers.map(m => m.username || m.user_id));
+
+  // ===== Accounts =====
+  const accRes = await fetch("/account-status");
+  const accData = await accRes.json();
+  let accountsList = Object.keys(accData);
+  let accIndex = 0;
+
+  // ===== History =====
+  const histRes = await fetch("/history");
+  const histData = await histRes.json();
+  const historySet = new Set(
+    Object.values(histData || {})
+      .filter(h => h.status === "success")
+      .map(h => h.username || h.user_id)
+  );
+
+  loading.style.display = "none";
+  autoAddList.innerHTML = "";
+  counter.innerText = `0 / ${members.length}`;
+  progress.style.width = `0%`;
+
+  let processed = 0;
 
   function getNextAvailableAccount(startIndex){
     const now = Date.now();
@@ -233,36 +274,99 @@ startAutoAddBtn.onclick=async()=>{
   }
 
   const batchSize = 5;
+
   for(let i=0;i<members.length;i+=batchSize){
     const batch = members.slice(i,i+batchSize);
+
     for(const m of batch){
+
+      const id = m.username || m.user_id;
       const nowTime = new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
-      const alreadyHistory = histList.some(h => (h.username===m.username || h.user_id===m.user_id) && h.status==="success");
-      if(alreadyHistory){
-        logConsole(`[SKIP ${nowTime}] ${m.username||m.user_id} already in history`, autoAddConsole);
-        processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
-        continue;
+
+      // ===== 🚫 Skip Target =====
+      if(targetSet.has(id)){
+        logConsole(`[SKIP TARGET ${nowTime}] ${id}`, autoAddConsole);
+        processed++;
+        counter.innerText=`${processed} / ${members.length}`;
+        progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+        continue; // ❌ NO DELAY
       }
-      let nextAccIdx=getNextAvailableAccount(accIndex);
-      if(nextAccIdx===-1){ autoAddStatus.innerText="All accounts FloodWait. Waiting..."; await new Promise(r=>setTimeout(r,5000)); nextAccIdx=getNextAvailableAccount(accIndex); if(nextAccIdx===-1) break; }
-      accIndex=nextAccIdx; const currentAccount=accountsList[accIndex];
-      logConsole(`[INFO ${nowTime}] Using account: ${currentAccount} for ${m.username||m.user_id}`, autoAddConsole);
-      const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
-      const result=await addRes.json();
+
+      // ===== 🚫 Skip History =====
+      if(historySet.has(id)){
+        logConsole(`[SKIP HISTORY ${nowTime}] ${id}`, autoAddConsole);
+        processed++;
+        counter.innerText=`${processed} / ${members.length}`;
+        progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+        continue; // ❌ NO DELAY
+      }
+
+      // ===== Get Account =====
+      let nextAccIdx = getNextAvailableAccount(accIndex);
+      if(nextAccIdx === -1){
+        autoAddStatus.innerText="All accounts FloodWait. Waiting...";
+        await new Promise(r=>setTimeout(r,5000));
+        nextAccIdx=getNextAvailableAccount(accIndex);
+        if(nextAccIdx === -1) break;
+      }
+
+      accIndex = nextAccIdx;
+      const currentAccount = accountsList[accIndex];
+
+      logConsole(`[ADD ${nowTime}] ${id} using ${currentAccount}`, autoAddConsole);
+
+      const addRes = await fetch("/add-member",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          username:m.username,
+          user_id:m.user_id,
+          access_hash:m.access_hash,
+          targetGroup:target
+        })
+      });
+
+      const result = await addRes.json();
+
       const li=document.createElement("li");
-      li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
-      autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
-      processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+      li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'">
+      ${id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">
+      ${result.status}</span> by ${result.accountUsed} <span class="pending">[${nowTime}]</span>
+      <br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
+      autoAddList.appendChild(li);
+
+      processed++;
+      counter.innerText=`${processed} / ${members.length}`;
+      progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
+
+      // ===== Delay ONLY success =====
       if(result.status==="success"){
-        const delay = 30000 + Math.floor(Math.random()*10000); let countdown = Math.floor(delay/1000);
-        autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-        const interval = setInterval(()=>{countdown--; autoAddStatus.innerText = `Waiting ${countdown}s before next add...`; if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText = "Resuming Auto Add..."; } },1000);
+        const delay = 30000 + Math.floor(Math.random()*10000);
+        let countdown = Math.floor(delay/1000);
+
+        autoAddStatus.innerText = `Waiting ${countdown}s...`;
+
+        const interval = setInterval(()=>{
+          countdown--;
+          autoAddStatus.innerText = `Waiting ${countdown}s...`;
+          if(countdown<=0){
+            clearInterval(interval);
+            autoAddStatus.innerText = "Resuming...";
+          }
+        },1000);
+
         await new Promise(r=>setTimeout(r, delay));
       }
-      if(result.status==="success" || (result.reason && result.reason.includes("FloodWait"))) accIndex=(accIndex+1)%accountsList.length;
+
+      // Rotate account
+      if(result.status==="success" || (result.reason && result.reason.includes("FloodWait"))){
+        accIndex=(accIndex+1)%accountsList.length;
+      }
     }
   }
-  autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
+
+  autoAddStatus.innerText="Auto Add Finished! ✅";
+  alert("Auto Add Finished");
 };
 
 // ===== History =====
