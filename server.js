@@ -115,6 +115,7 @@ async function autoScrapeAllGroups(account){
             username:m.username||null,
             first_name:m.first_name||null,
             last_name:m.last_name||null,
+            access_hash:m.access_hash ? BigInt(m.access_hash).toString() : null,
             avatar:m.photo?`https://t.me/i/userpic/320/${m.id}.jpg`:null,
             timestamp:Date.now()
           });
@@ -146,7 +147,7 @@ app.post('/members',async(req,res)=>{
     const members = all.filter(p=>!p.bot).map(p=>({
       user_id:p.id,
       username:p.username,
-      access_hash:p.access_hash,
+      access_hash:p.access_hash ? BigInt(p.access_hash).toString() : null,
       avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
     }));
 
@@ -198,7 +199,7 @@ app.post('/add-member',async(req,res)=>{
 
       // Save to Firebase
       await set(ref(db, `mygroup_members/${targetGroup}/${user_id}`),{
-        username,user_id,avatar:`https://t.me/i/userpic/320/${user_id}.jpg`, timestamp:Date.now()
+        username,user_id,access_hash:access_hash||null, avatar:`https://t.me/i/userpic/320/${user_id}.jpg`, timestamp:Date.now()
       });
 
       await sleep(30000 + Math.floor(Math.random()*10000));
