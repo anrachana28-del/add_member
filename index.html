@@ -334,6 +334,25 @@ startAutoAddBtn.onclick = async () => {
   autoAddStatus.innerText = `Auto Add Finished! ✅ Skipped: ${skippedCount}`;
   alert(`Auto Add Finished! Skipped ${skippedCount} members`);
 };
+
+  // ===== History =====
+const historyList=document.getElementById("historyList");
+async function fetchHistory(){
+  const res=await fetch("/history"); const data=await res.json(); historyList.innerHTML="";
+  Object.values(data).forEach(h=>{
+    const color=h.status==="success"?"success":h.status==="failed"?"failed":h.status==="skipped"?"skipped":"pending";
+    const timeStr = new Date(h.timestamp).toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
+    historyList.innerHTML+=`<li class="${color}">${h.username||h.user_id} → ${h.status} by ${h.accountUsed||'N/A'}<br><span class="pending" style="font-size:12px;">Reason: ${h.reason||'N/A'} | ${timeStr}</span></li>`;
+  });
+}
+setInterval(fetchHistory,6000); fetchHistory();
+
+const downloadHistoryBtn=document.getElementById("downloadHistoryBtn");
+downloadHistoryBtn.onclick=async()=>{
+  const res=await fetch("/history"); const data=await res.json();
+  const blob=new Blob([JSON.stringify(data,null,2)]); const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="history.json"; a.click();
+};
 </script>
 </body>
 </html>
