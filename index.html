@@ -175,37 +175,25 @@ async function loadAccountsDropdown(){
 }
 setInterval(loadAccountsDropdown,1000); loadAccountsDropdown();
 
-// ===== Console Log Auto Scroll =====
-function logConsole(msg){
-  autoAddConsole.innerHTML += msg + "<br>";
-  autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
-}
-
-// ===== Auto Add Members =====
-// ===== Auto Add Members with Export First =====
-const startAutoAddBtn = document.getElementById("startAutoAddBtn");
-const autoAddStatus = document.getElementById("autoAddStatus");
-const autoAddList = document.getElementById("autoAddList");
-const counter = document.getElementById("autoAddCounter");
-const progress = document.getElementById("autoAddProgress");
-const autoAddConsole = document.getElementById("autoAddConsole");
-const sourceGroupInput = document.getElementById("sourceGroupInput");
-const targetGroupInput = document.getElementById("targetGroupInput");
-
-// Regex to detect Chinese characters
-function hasChinese(text) {
-  return /[\u4e00-\u9fff]/.test(text || "");
-}
-
-// Console log helper
+// ===== Console log helper =====
+const autoAddConsole=document.getElementById("autoAddConsole");
 function logConsole(msg){
   autoAddConsole.innerHTML += msg + "<br>";
   const lines = autoAddConsole.innerHTML.split("<br>");
-  if(lines.length > 500){
-    autoAddConsole.innerHTML = lines.slice(lines.length-500).join("<br>");
-  }
+  if(lines.length > 500){ autoAddConsole.innerHTML = lines.slice(lines.length-500).join("<br>"); }
   autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
+
+// ===== Detect Chinese =====
+function hasChinese(text){ return /[\u4e00-\u9fff]/.test(text || ""); }
+
+// ===== Auto Add Members =====
+const autoAddStatus=document.getElementById("autoAddStatus");
+const autoAddList=document.getElementById("autoAddList");
+const counter=document.getElementById("autoAddCounter");
+const progress=document.getElementById("autoAddProgress");
+const sourceGroupInput=document.getElementById("sourceGroupInput");
+const targetGroupInput=document.getElementById("targetGroupInput");
 
 startAutoAddBtn.onclick = async () => {
   const source = sourceGroupInput.value.trim();
@@ -215,16 +203,12 @@ startAutoAddBtn.onclick = async () => {
   autoAddStatus.innerText = "⏳ Exporting members from source group...";
 
   // 1️⃣ Fetch source members
-  const resSource = await fetch("/members", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ group: source })
-  });
+  const resSource = await fetch("/members", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({group:source})});
   let sourceMembers = await resSource.json();
   if(sourceMembers.error){ alert(sourceMembers.error); return; }
 
-  // Optional: Export all source members to JSON file
-  const blob = new Blob([JSON.stringify(sourceMembers, null, 2)], { type: "application/json" });
+  // Auto download source members JSON
+  const blob = new Blob([JSON.stringify(sourceMembers,null,2)],{type:"application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `members_${source}.json`;
@@ -233,23 +217,13 @@ startAutoAddBtn.onclick = async () => {
   autoAddStatus.innerText = `✅ Exported ${sourceMembers.length} members. Checking against target group...`;
 
   // 2️⃣ Fetch target members
-  const resTarget = await fetch("/members", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ group: target })
-  });
+  const resTarget = await fetch("/members", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({group:target})});
   const targetMembers = await resTarget.json();
   if(targetMembers.error){ alert(targetMembers.error); return; }
+  const targetIds = new Set(targetMembers.map(m=>m.user_id));
 
-  const targetIds = new Set(targetMembers.map(m => m.user_id));
-
-  // 3️⃣ Filter members: skip existing and Chinese usernames
-  let membersToAdd = sourceMembers.filter(m => {
-    if(targetIds.has(m.user_id)) return false;
-    if(hasChinese(m.username)) return false;
-    return true;
-  });
-
+  // 3️⃣ Filter members: skip existing + Chinese
+  let membersToAdd = sourceMembers.filter(m => !targetIds.has(m.user_id) && !hasChinese(m.username));
   autoAddStatus.innerText = `✅ Ready to add ${membersToAdd.length} members (skipped ${sourceMembers.length - membersToAdd.length})`;
 
   // 4️⃣ Fetch accounts
@@ -266,11 +240,9 @@ startAutoAddBtn.onclick = async () => {
   function getNextAvailableAccount(startIndex){
     const now = Date.now();
     for(let i=0;i<accountsList.length;i++){
-      let idx = (startIndex + i) % accountsList.length;
-      const acc = accData[accountsList[idx]];
-      if(acc.status === "active" && (!acc.floodWaitUntil || acc.floodWaitUntil <= now)){
-        return idx;
-      }
+      let idx=(startIndex+i)%accountsList.length;
+      const acc=accData[accountsList[idx]];
+      if(acc.status==="active" && (!acc.floodWaitUntil || acc.floodWaitUntil<=now)) return idx;
     }
     return -1;
   }
@@ -278,7 +250,6 @@ startAutoAddBtn.onclick = async () => {
   // 5️⃣ Auto Add Loop
   for(const m of membersToAdd){
     const nowTime = new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
-    
     let nextAccIdx = getNextAvailableAccount(accIndex);
     if(nextAccIdx === -1){
       autoAddStatus.innerText = "⚠️ All accounts FloodWait. Waiting 5s...";
@@ -293,31 +264,22 @@ startAutoAddBtn.onclick = async () => {
     autoAddStatus.innerText = `Adding ${m.username||m.user_id} with ${currentAccount}`;
 
     // Call add-member endpoint
-    const addRes = await fetch("/add-member", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        username: m.username,
-        user_id: m.user_id,
-        access_hash: m.access_hash,
-        targetGroup: target
-      })
-    });
+    const addRes = await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+      username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target
+    })});
     const result = await addRes.json();
 
     processed++;
     counter.innerText = `${processed} / ${membersToAdd.length}`;
     progress.style.width = `${Math.floor((processed/membersToAdd.length)*100)}%`;
 
-    // Only show successfully added members in UI list
-    if(result.status === "success"){
+    if(result.status==="success"){
       const li = document.createElement("li");
       li.innerHTML = `<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="success">${result.status}</span> by ${result.accountUsed||currentAccount} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
       autoAddList.appendChild(li);
       autoAddList.scrollTop = autoAddList.scrollHeight;
     }
 
-    // Rotate account if success or FloodWait
     if(result.status==="success" || (result.reason && result.reason.includes("FloodWait"))){
       accIndex = (accIndex + 1) % accountsList.length;
     }
@@ -327,11 +289,7 @@ startAutoAddBtn.onclick = async () => {
       const delay = 30000 + Math.floor(Math.random()*10000);
       let countdown = Math.floor(delay/1000);
       autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-      const interval = setInterval(()=>{
-        countdown--;
-        autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-        if(countdown <= 0){ clearInterval(interval); autoAddStatus.innerText = "Resuming Auto Add..."; }
-      },1000);
+      const interval = setInterval(()=>{ countdown--; autoAddStatus.innerText=`Waiting ${countdown}s before next add...`; if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText="Resuming Auto Add..."; } },1000);
       await new Promise(r=>setTimeout(r, delay));
     }
   }
