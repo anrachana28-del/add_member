@@ -195,109 +195,112 @@ const progress=document.getElementById("autoAddProgress");
 const sourceGroupInput=document.getElementById("sourceGroupInput");
 const targetGroupInput=document.getElementById("targetGroupInput");
 
+// ===== Auto Add Members without Delay, with Target Firebase Export =====
 startAutoAddBtn.onclick = async () => {
   const source = sourceGroupInput.value.trim();
   const target = targetGroupInput.value.trim();
-  if(!source || !target) return alert("Enter both Source & Target groups");
+  if (!source || !target) return alert("Enter both Source & Target groups");
 
-  autoAddStatus.innerText = "⏳ Exporting members from source group...";
+  autoAddStatus.innerText = "⏳ Exporting Target Group members to Firebase...";
+  autoAddConsole.innerHTML = "";
+  autoAddList.innerHTML = "";
+  counter.innerText = "0 / 0";
+  progress.style.width = "0%";
 
-  // 1️⃣ Fetch source members
-  const resSource = await fetch("/members", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({group:source})});
-  let sourceMembers = await resSource.json();
-  if(sourceMembers.error){ alert(sourceMembers.error); return; }
-
-  // Auto download source members JSON
-  const blob = new Blob([JSON.stringify(sourceMembers,null,2)],{type:"application/json"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `members_${source}.json`;
-  a.click();
-
-  autoAddStatus.innerText = `✅ Exported ${sourceMembers.length} members. Checking against target group...`;
-
-  // 2️⃣ Fetch target members
-  const resTarget = await fetch("/members", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({group:target})});
+  // 1️⃣ Fetch Target Group members first
+  const resTarget = await fetch("/members", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group: target })
+  });
   const targetMembers = await resTarget.json();
-  if(targetMembers.error){ alert(targetMembers.error); return; }
-  const targetIds = new Set(targetMembers.map(m=>m.user_id));
+  if (targetMembers.error) return alert(targetMembers.error);
 
-  // 3️⃣ Filter members: skip existing + Chinese
-  let membersToAdd = sourceMembers.filter(m => !targetIds.has(m.user_id) && !hasChinese(m.username));
+  // 2️⃣ Save Target members to Firebase automatically
+  await fetch("/save-target-members", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group: target, members: targetMembers })
+  });
+
+  autoAddStatus.innerText = `✅ Target members exported (${targetMembers.length})`;
+
+  // 3️⃣ Fetch Source Group members
+  const resSource = await fetch("/members", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group: source })
+  });
+  const sourceMembers = await resSource.json();
+  if (sourceMembers.error) return alert(sourceMembers.error);
+
+  // 4️⃣ Skip members already in target
+  const targetIds = new Set(targetMembers.map(m => m.user_id));
+  const membersToAdd = sourceMembers.filter(m => !targetIds.has(m.user_id));
+
   autoAddStatus.innerText = `✅ Ready to add ${membersToAdd.length} members (skipped ${sourceMembers.length - membersToAdd.length})`;
+  counter.innerText = `0 / ${membersToAdd.length}`;
 
-  // 4️⃣ Fetch accounts
+  // 5️⃣ Fetch accounts
   const accRes = await fetch("/account-status");
   const accData = await accRes.json();
-  let accountsList = Object.keys(accData);
+  const accountsList = Object.keys(accData);
   let accIndex = 0;
   let processed = 0;
 
-  autoAddList.innerHTML = "";
-  counter.innerText = `0 / ${membersToAdd.length}`;
-  progress.style.width = `0%`;
-
-  function getNextAvailableAccount(startIndex){
+  function getNextAvailableAccount(startIndex) {
     const now = Date.now();
-    for(let i=0;i<accountsList.length;i++){
-      let idx=(startIndex+i)%accountsList.length;
-      const acc=accData[accountsList[idx]];
-      if(acc.status==="active" && (!acc.floodWaitUntil || acc.floodWaitUntil<=now)) return idx;
+    for (let i = 0; i < accountsList.length; i++) {
+      const idx = (startIndex + i) % accountsList.length;
+      const acc = accData[accountsList[idx]];
+      if (acc.status === "active" && (!acc.floodWaitUntil || acc.floodWaitUntil <= now)) {
+        return idx;
+      }
     }
     return -1;
   }
 
-  // 5️⃣ Auto Add Loop
-  for(const m of membersToAdd){
-    const nowTime = new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
-    let nextAccIdx = getNextAvailableAccount(accIndex);
-    if(nextAccIdx === -1){
+  // 6️⃣ Add members immediately, skip if exists
+  for (const m of membersToAdd) {
+    const nowTime = new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Phnom_Penh', hour12: true });
+    const nextAccIdx = getNextAvailableAccount(accIndex);
+    if (nextAccIdx === -1) {
       autoAddStatus.innerText = "⚠️ All accounts FloodWait. Waiting 5s...";
-      await new Promise(r=>setTimeout(r,5000));
-      nextAccIdx = getNextAvailableAccount(accIndex);
-      if(nextAccIdx === -1) break;
+      await new Promise(r => setTimeout(r, 5000));
+      accIndex = getNextAvailableAccount(accIndex);
+      if (accIndex === -1) break;
+    } else {
+      accIndex = nextAccIdx;
     }
-    accIndex = nextAccIdx;
     const currentAccount = accountsList[accIndex];
 
-    logConsole(`[INFO ${nowTime}] Adding ${m.username||m.user_id} using ${currentAccount}`);
-    autoAddStatus.innerText = `Adding ${m.username||m.user_id} with ${currentAccount}`;
+    logConsole(`[INFO ${nowTime}] Adding ${m.username || m.user_id} using ${currentAccount}`);
+    autoAddStatus.innerText = `Adding ${m.username || m.user_id} with ${currentAccount}`;
 
-    // Call add-member endpoint
-    const addRes = await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-      username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target
-    })});
+    // Add member endpoint
+    const addRes = await fetch("/add-member", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: m.username, user_id: m.user_id, access_hash: m.access_hash, targetGroup: target })
+    });
     const result = await addRes.json();
+
+    const li = document.createElement("li");
+    li.innerHTML = `<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username || m.user_id} → <span class="${result.status === 'success' ? 'success' : result.status === 'skipped' ? 'skipped' : 'failed'}">${result.status}</span> by ${result.accountUsed || currentAccount} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason || 'N/A'}</span>`;
+    autoAddList.appendChild(li);
+    autoAddList.scrollTop = autoAddList.scrollHeight;
 
     processed++;
     counter.innerText = `${processed} / ${membersToAdd.length}`;
-    progress.style.width = `${Math.floor((processed/membersToAdd.length)*100)}%`;
+    progress.style.width = `${Math.floor((processed / membersToAdd.length) * 100)}%`;
 
-    if(result.status==="success"){
-      const li = document.createElement("li");
-      li.innerHTML = `<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="success">${result.status}</span> by ${result.accountUsed||currentAccount} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
-      autoAddList.appendChild(li);
-      autoAddList.scrollTop = autoAddList.scrollHeight;
-    }
-
-    if(result.status==="success" || (result.reason && result.reason.includes("FloodWait"))){
-      accIndex = (accIndex + 1) % accountsList.length;
-    }
-
-    // Delay 30–40s after success
-    if(result.status==="success"){
-      const delay = 30000 + Math.floor(Math.random()*10000);
-      let countdown = Math.floor(delay/1000);
-      autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-      const interval = setInterval(()=>{ countdown--; autoAddStatus.innerText=`Waiting ${countdown}s before next add...`; if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText="Resuming Auto Add..."; } },1000);
-      await new Promise(r=>setTimeout(r, delay));
-    }
+    // Rotate account for next member
+    accIndex = (accIndex + 1) % accountsList.length;
   }
 
   autoAddStatus.innerText = "✅ Auto Add Finished!";
-  alert("Auto Add Finished");
+  alert("Auto Add Finished!");
 };
-
 // ===== History =====
 const historyList=document.getElementById("historyList");
 async function fetchHistory(){
