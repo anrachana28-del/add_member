@@ -44,11 +44,6 @@ th{background:#11141f;color:#00ff7f;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
 #floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
-
-/* Modal */
-#membersModal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;overflow:auto;}
-#membersModalContent{max-width:800px;margin:50px auto;background:#1e1e2a;border-radius:20px;padding:20px;position:relative;}
-#closeModalBtn{position:absolute;top:10px;right:15px;padding:8px 12px;border:none;border-radius:12px;background:#ff4c4c;color:#fff;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -86,7 +81,6 @@ th{background:#11141f;color:#00ff7f;}
 <input id="sourceGroupInput" placeholder="Source Group">
 <input id="targetGroupInput" placeholder="Target Group">
 <button id="startAutoAddBtn">Start Auto-Add</button>
-<button id="showMembersBtn">Show Members List</button>
 <div id="loading" class="spinner">⏳ Loading Members...</div>
 <div id="autoAddStatus"></div>
 <div id="autoAddCounter">0 / 0</div>
@@ -114,22 +108,6 @@ th{background:#11141f;color:#00ff7f;}
 <ul id="historyList"></ul>
 <button id="downloadHistoryBtn">Download History</button>
 </section>
-
-<!-- Members Modal -->
-<div id="membersModal">
-  <div id="membersModalContent">
-    <button id="closeModalBtn">Close</button>
-    <h2 style="color:#00ff7f;text-align:center;">Group Members</h2>
-    <div class="table-responsive">
-      <table>
-        <thead>
-          <tr><th>Avatar</th><th>Username</th><th>User ID</th></tr>
-        </thead>
-        <tbody id="modalMembersTable"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 
 </div>
 
@@ -272,20 +250,17 @@ startAutoAddBtn.onclick=async()=>{
       li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <span class="pending">[${nowTime}]</span><br><span class="pending">Reason: ${result.reason||'N/A'}</span>`;
       autoAddList.appendChild(li); autoAddList.scrollTop=autoAddList.scrollHeight;
 
-      // Add to modal live
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td><img src="${m.avatar}" style="width:32px;height:32px;border-radius:50%;" onerror="this.src='https://via.placeholder.com/32?text=U'"></td>
-                      <td style="color:#00ff7f;">${m.username||'N/A'}</td>
-                      <td style="color:#00ff7f;">${m.user_id}</td>`;
-      modalMembersTable.appendChild(tr);
-
       processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
 
       if(result.status==="success"){
         const delay = 30000 + Math.floor(Math.random()*10000); // Random 30–40s
         let countdown = Math.floor(delay/1000);
         autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-        const interval = setInterval(()=>{ countdown--; autoAddStatus.innerText = `Waiting ${countdown}s before next add...`; if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText = "Resuming Auto Add..."; } },1000);
+        const interval = setInterval(()=>{
+          countdown--;
+          autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
+          if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText = "Resuming Auto Add..."; }
+        },1000);
         await new Promise(r=>setTimeout(r, delay));
       }
 
@@ -295,31 +270,6 @@ startAutoAddBtn.onclick=async()=>{
 
   autoAddStatus.innerText="Auto Add Finished! ✅"; alert("Auto Add Finished");
 };
-
-// ===== Members Modal =====
-const membersModal = document.getElementById("membersModal");
-const closeModalBtn = document.getElementById("closeModalBtn");
-const showMembersBtn = document.getElementById("showMembersBtn");
-const modalMembersTable = document.getElementById("modalMembersTable");
-let modalInterval;
-showMembersBtn.onclick = async () => { membersModal.style.display="block"; await fetchAndUpdateMembers(); modalInterval=setInterval(fetchAndUpdateMembers,10000); };
-closeModalBtn.onclick = () => { membersModal.style.display="none"; clearInterval(modalInterval); };
-async function fetchAndUpdateMembers(){
-  const group = targetGroupInput.value.trim();
-  if(!group) return;
-  try{
-    const res = await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body: JSON.stringify({group})});
-    const members = await res.json(); if(members.error) return;
-    modalMembersTable.innerHTML="";
-    members.forEach(m=>{
-      const tr=document.createElement("tr");
-      tr.innerHTML=`<td><img src="${m.avatar}" style="width:32px;height:32px;border-radius:50%;" onerror="this.src='https://via.placeholder.com/32?text=U'"></td>
-                    <td>${m.username||'N/A'}</td>
-                    <td>${m.user_id}</td>`;
-      modalMembersTable.appendChild(tr);
-    });
-  }catch(e){ console.log(e); }
-}
 
 // ===== History =====
 const historyList=document.getElementById("historyList");
@@ -332,7 +282,9 @@ async function fetchHistory(){
   });
 }
 setInterval(fetchHistory,6000); fetchHistory();
-document.getElementById("downloadHistoryBtn").onclick=async()=>{
+
+const downloadHistoryBtn=document.getElementById("downloadHistoryBtn");
+downloadHistoryBtn.onclick=async()=>{
   const res=await fetch("/history"); const data=await res.json();
   const blob=new Blob([JSON.stringify(data,null,2)]); const a=document.createElement("a");
   a.href=URL.createObjectURL(blob); a.download="history.json"; a.click();
