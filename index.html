@@ -45,6 +45,13 @@ th{background:#11141f;color:#00ff7f;}
 .red{color:#ff4c4c;}
 .console-log{background:#11141f;padding:10px;border-radius:12px;height:200px;overflow-y:auto;font-size:13px;margin-top:10px;}
 #floodAlert{color:red;font-weight:700;margin-top:5px;display:none;}
+
+/* ===== Modal ===== */
+.modal{display:none;position:fixed;z-index:1000;left:0;top:0;width:100%;height:100%;overflow:auto;background:rgba(0,0,0,0.8);}
+.modal-content{background:#1e1e2a;margin:10% auto;padding:20px;border-radius:20px;max-width:600px;position:relative;}
+.close-modal{position:absolute;top:10px;right:15px;font-size:24px;font-weight:bold;cursor:pointer;color:#00ff7f;}
+.modal ul{max-height:400px;overflow-y:auto;}
+.modal li.newly-added{background:#004400;}
 </style>
 </head>
 <body>
@@ -93,8 +100,8 @@ th{background:#11141f;color:#00ff7f;}
 <hr>
 <div class="card-title">Target Group Members Live</div>
 <input id="targetGroupInputLive" placeholder="Target Group Live">
-<button id="showMembersBtn">Show Members</button>
-<ul id="targetMembersListLive"></ul>
+<button id="showMembersBtn">Show Members in Modal</button>
+
 </section>
 
 <!-- Upload -->
@@ -117,6 +124,15 @@ th{background:#11141f;color:#00ff7f;}
 <button id="downloadHistoryBtn">Download History</button>
 </section>
 
+</div>
+
+<!-- ===== Modal ===== -->
+<div id="membersModal" class="modal">
+  <div class="modal-content">
+    <span class="close-modal">&times;</span>
+    <h3>Target Group Members</h3>
+    <ul id="modalMembersList"></ul>
+  </div>
 </div>
 
 <script>
@@ -151,118 +167,36 @@ async function fetchAccounts(){
 }
 setInterval(fetchAccounts,1000); fetchAccounts();
 
-// ===== Console Log =====
-function logConsole(msg){
-  autoAddConsole.innerHTML += msg + "<br>";
-  autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
-}
+// ===== Modal Logic =====
+const modal=document.getElementById("membersModal");
+const modalList=document.getElementById("modalMembersList");
+const closeModal=document.querySelector(".close-modal");
+closeModal.onclick = ()=>{modal.style.display="none";}
+window.onclick = (e)=>{if(e.target==modal) modal.style.display="none";}
 
-// ===== Auto Add Members =====
-const autoAddList=document.getElementById("autoAddList"),
-      counter=document.getElementById("autoAddCounter"),
-      progress=document.getElementById("autoAddProgress"),
-      autoAddStatus=document.getElementById("autoAddStatus"),
-      autoAddConsole=document.getElementById("autoAddConsole"),
-      sourceGroupInput=document.getElementById("sourceGroupInput"),
-      targetGroupInput=document.getElementById("targetGroupInput");
+// ===== Fetch Live Members =====
+const targetGroupInputLive=document.getElementById("targetGroupInputLive");
+const showMembersBtn=document.getElementById("showMembersBtn");
 
-const targetGroupInputLive=document.getElementById("targetGroupInputLive"),
-      showMembersBtn=document.getElementById("showMembersBtn"),
-      targetMembersListLive=document.getElementById("targetMembersListLive");
-
-let liveInterval;
-
-// ===== Fetch Live Target Members =====
-async function fetchTargetMembersLive(){
+showMembersBtn.onclick = async ()=>{
   const group = targetGroupInputLive.value.trim();
-  if(!group) return;
-  targetMembersListLive.innerHTML = "⏳ Loading...";
-  const res = await fetch("/group-members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group})});
-  const members = await res.json();
-  targetMembersListLive.innerHTML = "";
-  if(!members.error){
-    members.forEach(m=>{
-      const li = document.createElement("li");
-      li.innerHTML = `<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id}`;
-      if(Date.now() - (m.timestamp||0) < 15000) li.classList.add("newly-added"); // highlight new member
-      targetMembersListLive.appendChild(li);
-    });
-  }
-}
+  if(!group) return alert("Enter Target Group");
+  modalList.innerHTML="⏳ Loading...";
+  modal.style.display="block";
 
-// Live update every 10s
-showMembersBtn.onclick = ()=>{
-  fetchTargetMembersLive();
-  if(liveInterval) clearInterval(liveInterval);
-  liveInterval = setInterval(fetchTargetMembersLive,10000);
-};
-
-// ===== Start Auto Add =====
-startAutoAddBtn.onclick=async()=>{
-  const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
-  if(!source||!target) return alert("Enter groups");
-
-  autoAddStatus.innerText="Fetching members...";
-  autoAddConsole.innerHTML="";
-  autoAddList.innerHTML="";
-  
-  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
-  const members=await res.json();
-  if(members.error){ alert(members.error); return; }
-
-  const histRes=await fetch("/history"); 
-  const histData=await histRes.json(); 
-  const histList = Object.values(histData||{});
-
-  let processed=0;
-  counter.innerText=`0 / ${members.length}`;
-  progress.style.width="0%";
-
-  for(const m of members){
-    // Skip if in history
-    if(histList.some(h=>h.username===m.username || h.user_id===m.user_id)){
-      logConsole(`[SKIP] ${m.username||m.user_id} already in history`);
-      processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor(processed/members.length*100)}%`;
-      continue;
-    }
-
-    // Skip if already in target group live
-    const liveRes=await fetch("/group-members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:target})});
-    const liveMembers=await liveRes.json();
-    if(liveMembers.some(u=>u.username===m.username || u.user_id===m.user_id)){
-      logConsole(`[SKIP] ${m.username||m.user_id} already in Target Group`);
-      processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor(processed/members.length*100)}%`;
-      continue;
-    }
-
-    // Add Member
-    autoAddStatus.innerText = `Adding ${m.username||m.user_id}...`;
-    const addRes=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:m.username,user_id:m.user_id,access_hash:m.access_hash,targetGroup:target})});
-    const result=await addRes.json();
-
-    const li=document.createElement("li");
-    li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id} → <span class="${result.status==='success'?'success':result.status==='skipped'?'skipped':'failed'}">${result.status}</span> by ${result.accountUsed} <br>Reason: ${result.reason||'N/A'}`;
-    autoAddList.appendChild(li);
-    autoAddList.scrollTop=autoAddList.scrollHeight;
-
-    processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor(processed/members.length*100)}%`;
-
-    // Delay 30-40s
-    if(result.status==="success"){
-      let delay = 30000 + Math.floor(Math.random()*10000);
-      let countdown = Math.floor(delay/1000);
-      autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-      const interval = setInterval(()=>{
-        countdown--;
-        autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
-        if(countdown<=0){ clearInterval(interval); autoAddStatus.innerText="Resuming Auto Add..."; }
-      },1000);
-      await new Promise(r=>setTimeout(r, delay));
-    }
-  }
-
-  autoAddStatus.innerText="Auto Add Finished! ✅";
-  alert("Auto Add Finished");
+  try{
+    const res=await fetch("/group-members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group})});
+    const members=await res.json();
+    modalList.innerHTML="";
+    if(!members.error){
+      members.forEach(m=>{
+        const li=document.createElement("li");
+        li.innerHTML=`<img class="avatar" src="${m.avatar}" onerror="this.src='https://via.placeholder.com/40?text=U'"> ${m.username||m.user_id}`;
+        if(Date.now() - (m.timestamp||0) < 15000) li.classList.add("newly-added");
+        modalList.appendChild(li);
+      });
+    }else{modalList.innerHTML="Error fetching members";}
+  }catch(e){modalList.innerHTML="Error: "+e.message;}
 };
 </script>
 </body>
