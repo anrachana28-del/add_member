@@ -181,6 +181,16 @@ function logConsole(msg){
   autoAddConsole.scrollTop = autoAddConsole.scrollHeight;
 }
 
+// ===== Load MyGroup Cache =====
+let myGroupCache = {}
+async function loadMyGroupCache(){
+  try{
+    const res = await fetch("/mygroup-cache");
+    const data = await res.json();
+    myGroupCache = data || {};
+  }catch(e){ console.log("Load cache error", e);}
+}
+
 // ===== Auto Add Members =====
 const autoAddList=document.getElementById("autoAddList"),
       counter=document.getElementById("autoAddCounter"),
@@ -195,6 +205,9 @@ startAutoAddBtn.onclick=async()=>{
   const source=sourceGroupInput.value.trim(), target=targetGroupInput.value.trim();
   if(!source||!target) return alert("Enter groups");
   loading.style.display="block"; autoAddStatus.innerText="Fetching members..."; autoAddConsole.innerHTML="";
+
+  await loadMyGroupCache();
+
   const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})});
   const members=await res.json(); loading.style.display="none";
   if(members.error){ alert(members.error); return; }
@@ -225,8 +238,10 @@ startAutoAddBtn.onclick=async()=>{
     for(const m of batch){
       const nowTime = new Date().toLocaleTimeString('en-US',{timeZone:'Asia/Phnom_Penh',hour12:true});
       const alreadyHistory = histList.some(h => (h.username===m.username || h.user_id===m.user_id) && h.status==="success");
-      if(alreadyHistory){
-        logConsole(`[SKIP ${nowTime}] ${m.username||m.user_id} already in history`);
+      const alreadyMyGroup = myGroupCache[m.user_id];
+
+      if(alreadyHistory || alreadyMyGroup){
+        logConsole(`[SKIP ${nowTime}] ${m.username||m.user_id} already in cache/history`);
         processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
         continue;
       }
@@ -253,6 +268,9 @@ startAutoAddBtn.onclick=async()=>{
       processed++; counter.innerText=`${processed} / ${members.length}`; progress.style.width=`${Math.floor((processed/members.length)*100)}%`;
 
       if(result.status==="success"){
+        // Update myGroupCache in real-time
+        myGroupCache[m.user_id] = true;
+
         const delay = 30000 + Math.floor(Math.random()*10000); // Random 30–40s
         let countdown = Math.floor(delay/1000);
         autoAddStatus.innerText = `Waiting ${countdown}s before next add...`;
